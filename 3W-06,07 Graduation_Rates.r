@@ -1,4 +1,4 @@
-OVERRIDE_REPORT_YEAR <- 2018 # Set to NA to use current year
+#OVERRIDE_REPORT_YEAR <- 2018 # Set to NA to use current year
 #OVERRIDE_COHORTS <- TRUE
 
 WRITE_OUTPUT <- TRUE
@@ -82,16 +82,18 @@ report_cutoff_date <- as.Date(str_c(report_year,"08-31",sep="-"))
 
 #nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*", report_year, "fa.*csv")
 #nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*(", report_year_150, "|", report_year_200, ")fa.*csv")
-nsc_detail_pat <- str_c("(", report_year_150, "|", report_year_200, ")fa",
-                        "_DETLRPT_SE_.*.csv")
+nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*_hcc_ipeds_g2_", report_year, "_se.*csv")
+#nsc_detail_pat <- str_c("(", report_year_150, "|", report_year_200, ")fa","_DETLRPT_SE_.*.csv")
 # nsc_detail_pat <- str_c("hcc_ipeds_g2_",report_year,"_se")
 nsc_folder <- "nsc"
+nsc_path <- file.path(".", nsc_folder)
 
 USE_FILE_COHORTS_150 <- report_year_150 < cohort_from_file_year
 USE_FILE_COHORTS_200 <- report_year_200 < cohort_from_file_year
 
 #project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+#project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+project_path <- '.'
 #input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
@@ -178,8 +180,16 @@ ipeds_cohort_COLLEAGUE_COHORTS <- getColleagueData( "STUDENT_TERMS" ) %>%
                     select(Term_ID, Cohort_Start_Date = Term_Start_Date) ) #%>%
     #select( -Student_Type )
 
-ipeds_cohort <- ipeds_cohort_FILE_COHORTS %>%
-    bind_rows( ipeds_cohort_COLLEAGUE_COHORTS )
+#ipeds_cohort <- ipeds_cohort_FILE_COHORTS %>%
+#    bind_rows( ipeds_cohort_COLLEAGUE_COHORTS )
+ipeds_cohort <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
+    filter( Cohort %in% c(report_cohorts) ) %>%
+    select( ID, Cohort, Term_ID ) %>%
+    collect() %>%
+    mutate( IPEDS_Report = if_else(Cohort==report_ftft_150,150,200) ) %>%
+    inner_join( terms %>% select(Term_ID,Cohort_Start_Date=Term_Start_Date) ) #%>%
+#    filter( Cohort_Year %in% c(report_year),
+#            Term_ID == report_term )
 
 person <- getColleagueData( "PERSON" ) %>%
     filter( FIRST.NAME != "" ) %>%
@@ -299,6 +309,7 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     collect() %>%
     inner_join( ipeds_cohort %>% select(ID,Cohort_Start_Date) ) %>%
     left_join( terms %>% select(Term_ID, Term_End_Date ) ) %>%
+    mutate( Cast_Date = as.Date(Cast_Date) ) %>%
     mutate( Graduation_Date = if_else(Cast_Date < Term_End_Date, Term_End_Date, Cast_Date),
             Graduated = 1 ) %>%
     filter( Term_End_Date >= Cohort_Start_Date ) %>%
@@ -329,10 +340,10 @@ nsc_files <- list.files( path = nsc_path,
                          ignore.case = TRUE ) %>% 
     lapply(function(x) readr::read_csv(x, col_types = cols(.default = col_character()))) %>% 
     bind_rows %>%
-    separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep="\\." ) %>%
+    separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep="\\;" ) %>%
     filter( `College Code/Branch` != "008083-00") %>%
     ungroup() %>%
-    inner_join(ipeds_cohort %>% select(ID,Term_ID)) %>%
+    inner_join(ipeds_cohort %>% select(ID,Cohort)) %>% #Term_ID)) %>%
     select( ID, College_Name=`College Name`, Enrollment_Begin=`Enrollment Begin`, Enrollment_End=`Enrollment End` ) %>%
     mutate( Enrollment_Begin = ymd(Enrollment_Begin),
             Enrollment_End = ymd(Enrollment_End) ) %>%
@@ -644,7 +655,7 @@ ipeds_g22_a <- ipeds_terms %>%
     mutate( UNITID = '198668',
             SURVSECT = 'G22',
             PART = 'A',
-            Filler = '     ',
+            Filler = '      ',
             ADEXCL = '000000' ) %>% # TODO: Need to find exclusions next time!
     add_column( !!!g22_a_cols[!names(g22_a_cols) %in% names(.)] ) %>%
     mutate_at(.vars=names(g22_a_cols), function(x) {return( coalesce(x,"000000") )} ) %>%

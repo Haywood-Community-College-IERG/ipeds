@@ -1,7 +1,7 @@
 #OVERRIDE_REPORT_YEAR <- 2017 # Comment for current academic year's fall term
 
 WRITE_OUTPUT <- TRUE
-CLEANUP <- TRUE
+#CLEANUP <- TRUE
 #TEST <- TRUE
 
 ir_root <- "L:/IERG"
@@ -90,10 +90,11 @@ report_cohort <- str_c(report_year, "FT")
 report_year_date <- ymd( str_c(report_year, 10, 15) )
 
 aid_federal_loans <- c("GSL","NDSL","PERK","PLUS","SMALT","USTF")
-aid_federal_grant <- c("ACG","ACG1","ACG2","IASG","PELL","SCH","SEOG") # Need to use Award_Type == 'F' for SCH
 aid_federal_non_pell <- c("ACG","ACG1","ACG2","IASG","SCH","SEOG") # Need to use Award_Type == 'F' for SCH
 aid_federal_pell <- c("PELL")
+aid_federal_grant <- unique(c(aid_federal_non_pell,aid_federal_pell))
 aid_federal_ws <- c("FWS")
+aid_federal_other <- c("CARES") # CARES funds are not Title IV
 aid_state_local <- c("NCCG","SCH","SSIG","STATE")  # Need to use Award_Type == 'S' for SCH
 aid_institution <- c("SCH")  # Need to use Award_Type == 'I'
 aid_other <- c("ALT","SCH","VET") # Need to use Award_Type == 'O'
@@ -103,10 +104,29 @@ aid_veterans_gi <- c("CH33")
 aid_veterans_dod <- c("NCMIL")
 aid_veterans <- unique(c(aid_veterans_gi,aid_veterans_dod))
 
+aid_group_2a <- unique(c(aid_federal_ws,
+                         aid_loans,
+                         aid_federal_grant,
+                         aid_state_local,
+                         aid_institution,
+                         aid_federal_other,
+                         aid_other))
+aid_group_2b <- unique(c(aid_loans,
+                         aid_federal_grant,
+                         aid_state_local,
+                         aid_institution,
+                         aid_federal_other))
+aid_group_3 <- unique(c(aid_federal_grant,
+                        aid_state_local,
+                        aid_institution))
+aid_group_4 <- unique(c(aid_federal_grant,
+                        aid_federal_ws,
+                        aid_federal_loans))
+
 fn_report_code <- "sfa"
 
 #project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+project_path <- "." # file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
 #input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
@@ -286,10 +306,11 @@ sfa_group1 <- fall_enrollment( report_year ) %>%
         Award_Category %in% c('SCH') & Award_Type == 'I' ~ "Institutional grant",
         Award_Category %in% c('SCH') & Award_Type == 'O' ~ "Other grant",
         Award_Category %in% c('ALT') & Award_Type == 'F' ~ "Federal loan",
-        Award_Category %in% c('ALT') & Award_Type == 'O' ~ "Other loan",
+        Award_Category %in% c('ALT') & Award_Type == 'O' ~ "Other loan", # This should be ignored and not reported here.
         Award_Category %in% aid_federal_pell ~ "Federal Pell",
         Award_Category %in% aid_federal_grant ~ "Federal grant",
         Award_Category %in% aid_federal_loans ~ "Federal loan",
+        Award_Category %in% aid_federal_other ~ "Federal other",
         Award_Category %in% aid_state_local ~ "State grant",
         Award_Category %in% aid_institution ~ "Institutional grant",
         Award_Category %in% aid_federal_ws ~ "Federal work-study",
@@ -314,12 +335,8 @@ sfa_group2_ids <- sfa_group2 %>%
     select(ID) %>%
     distinct()
 
-ipeds_award_categories2b <- unique(c(aid_loans,
-                                      aid_federal_grant,
-                                      aid_state_local,
-                                      aid_institution))
 sfa_group2b_ids <- sfa_group2 %>%
-    filter( Award_Category %in% ipeds_award_categories2b ) %>%
+    filter( Award_Category %in% aid_group_2b ) %>%
     select(ID) %>%
     distinct()
 
@@ -327,11 +344,8 @@ sfa_group2b_ids <- sfa_group2 %>%
 # federal government, state/local government, or the institution.
 # 
 # DO NOT include students who received aid only from other sources.
-ipeds_award_categories_g3 <- unique(c(aid_federal_grant,
-                                     aid_state_local,
-                                     aid_institution))
 sfa_group3 <- sfa_group2 %>%
-    filter( Award_Category %in% ipeds_award_categories_g3,
+    filter( Award_Category %in% aid_group_3,
             Award_Type %in% c('F','S','I') ) %>%
     filter( Tuition_Type == "In-State" ) #%>%
     #select( ID ) %>%
@@ -348,11 +362,8 @@ sfa_group3_ids <- sfa_group3 %>%
 # to Retain Talent Grant (National SMART Grant), Teacher Education Assistance for 
 # College and Higher Education (TEACH), Federal Work Study, Federal Perkins Loan,
 # Subsidized Direct or FFEL Stafford Loan, and Unsubsidized Direct or FFEL Stafford Loan
-ipeds_award_categories_g4 <- unique(c(aid_federal_grant,
-                                    aid_federal_ws,
-                                    aid_federal_loans))
 sfa_group4 <- sfa_group2 %>%
-    filter( Award_Category %in% ipeds_award_categories_g4,
+    filter( Award_Category %in% aid_group_4,
             Award_Type == 'F' ) #%>%
     # select( ID ) %>%
     # distinct() %>%
@@ -383,7 +394,7 @@ a_cols_a <- c( UGAIDA=NA_character_, UGAIDPA=NA_character_, UGLNFA=NA_character_
 n_cols_a <- c( SCFA2=NA_character_, UGAIDN=NA_character_, UGAIDPN=NA_character_, UGLNFN=NA_character_ )
 b6_cols_a <- c( SCFY2=NA_character_ )
 
-ipeds_award_categories_ugaida <- unique(c(aid_federal_grant,aid_state_local,aid_institution,aid_other))
+ipeds_award_categories_ugaida <- unique(c(aid_federal_grant,aid_state_local,aid_institution,aid_federal_other,aid_other))
 
 ipeds_saf_a <- sfa_group1 %>%
     
@@ -391,7 +402,7 @@ ipeds_saf_a <- sfa_group1 %>%
                UGAIDN = n_distinct(ID[Award_Amount > 0], na.rm = TRUE),  # IPEDS Part B, Line 01, Column 1
                UGAIDPN = n_distinct(ID[Award_Category %in% aid_federal_pell & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part B, Line 02, Column 1
                UGLNFN = n_distinct(ID[Award_Category %in% aid_federal_loans & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part B, Line 03, Column 1
-               UGAIDA = sum(Award_Amount[Award_Category %in% ipeds_award_categories_ugaida], na.rm = TRUE),  # IPEDS SFA Part B, Line 01, Column 3
+               UGAIDA = sum(Award_Amount, na.rm = TRUE),  # IPEDS SFA Part B, Line 01, Column 3
                UGAIDPA = sum(Award_Amount[Award_Category %in% aid_federal_pell], na.rm = TRUE),  # IPEDS SFA Part B, Line 02, Column 3
                UGLNFA = sum(Award_Amount[Award_Category %in% aid_federal_loans], na.rm = TRUE),  # IPEDS SFA Part B, Line 03, Column 3
     ) %>%
@@ -426,17 +437,6 @@ n_cols_b <- c( SCFA1N=NA_character_, SCFA12N=NA_character_, SCFA13N=NA_character
                ANYAIDN=NA_character_, ANYAIDNF=NA_character_ )
 b6_cols_b <- c( SCFY1N=NA_character_, SCFA11N=NA_character_  )
 
-ipeds_award_categories_2a <- unique(c(aid_federal_ws,
-                                      aid_loans,
-                                      aid_federal_grant,
-                                      aid_state_local,
-                                      aid_institution,
-                                      aid_other))
-
-ipeds_award_categories_2b <- unique(c(aid_loans,
-                                      aid_federal_grant,
-                                      aid_state_local,
-                                      aid_institution))
 
 ipeds_saf_b <- sfa_group2 %>%
     
@@ -444,8 +444,8 @@ ipeds_saf_b <- sfa_group2 %>%
                SCFA12N = n_distinct(ID[Tuition_Type == "In-State"], na.rm = TRUE),  # IPEDS SFA Part C, Page 1, Line 01b
                SCFA13N = n_distinct(ID[Tuition_Type == "Out-of-State"], na.rm = TRUE),  # IPEDS SFA Part C, Page 1, Line 01c
                
-               ANYAIDN = n_distinct(ID[Award_Category %in% ipeds_award_categories_2a & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part A, Line 02a
-               ANYAIDNF = n_distinct(ID[Award_Category %in% ipeds_award_categories_2b & Award_Amount >0], na.rm = TRUE)  # IPEDS SFA Part A, Line 02b
+               ANYAIDN = n_distinct(ID[Award_Category %in% aid_group_2a & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part A, Line 02a
+               ANYAIDNF = n_distinct(ID[Award_Category %in% aid_group_2b & Award_Amount >0], na.rm = TRUE)  # IPEDS SFA Part A, Line 02b
     ) %>%
     
     add_column( !!!saf_b_cols[!names(saf_b_cols) %in% names(.)] ) %>%
@@ -483,26 +483,15 @@ n_cols_c <- c( AGRNT_N=NA_character_, FGRNT_N=NA_character_, PGRNT_N=NA_characte
 a_cols_c <- c( PGRNT_T=NA_character_, OFGRNT_T=NA_character_, SGRNT_T=NA_character_, IGRNT_T=NA_character_, 
                FLOAN_T=NA_character_, OLOAN_T=NA_character_ )
 
-ipeds_award_categories_c02_q1 <- unique(c(aid_federal_grant,aid_state_local,aid_institution))
-
-ipeds_award_categories_2a <- unique(c(aid_federal_ws,
-                                      aid_loans,
-                                      aid_federal_grant,
-                                      aid_state_local,
-                                      aid_institution,
-                                      aid_other))
-
-ipeds_award_categories_2b <- unique(c(aid_loans,
-                                      aid_federal_grant,
-                                      aid_state_local,
-                                      aid_institution))
+ipeds_award_categories_c02_q1 <- unique(c(aid_federal_grant,aid_state_local,aid_institution,aid_federal_other))
+ipeds_award_categories_c02_q2 <- unique(c(aid_federal_non_pell,aid_federal_other))
 
 ipeds_saf_c <- sfa_group2 %>%
     
     summarise( AGRNT_N = n_distinct(ID[Award_Category %in% ipeds_award_categories_c02_q1 & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 01, Column 1
                FGRNT_N = n_distinct(ID[Award_Category %in% aid_federal_grant & Award_Type == 'F' & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02, Column 1
                PGRNT_N = n_distinct(ID[Award_Category %in% aid_federal_pell & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02a, Column 1
-               OFGRNT_N = n_distinct(ID[Award_Category %in% aid_federal_non_pell & Award_Type == 'F' & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02b, Column 1
+               OFGRNT_N = n_distinct(ID[Award_Category %in% ipeds_award_categories_c02_q2 & Award_Type == 'F' & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02b, Column 1
                SGRNT_N = n_distinct(ID[Award_Category %in% aid_state_local & Award_Type == 'S' & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 03, Column 1
                IGRNT_N = n_distinct(ID[Award_Category %in% aid_institution & Award_Type == 'I' & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 04, Column 1
                LOAN_N = n_distinct(ID[Award_Category %in% aid_loans & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 05, Column 1
@@ -510,7 +499,7 @@ ipeds_saf_c <- sfa_group2 %>%
                OLOAN_N = n_distinct(ID[Award_Category %in% aid_other_loans & Award_Amount >0], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 05b, Column 1
                
                PGRNT_T = sum(Award_Amount[Award_Category %in% aid_federal_pell], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02a, Column 3
-               OFGRNT_T = sum(Award_Amount[Award_Category %in% aid_federal_non_pell & Award_Type == 'F'], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02b, Column 3
+               OFGRNT_T = sum(Award_Amount[Award_Category %in% ipeds_award_categories_c02_q2 & Award_Type == 'F'], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 02b, Column 3
                SGRNT_T = sum(Award_Amount[Award_Category %in% aid_state_local & Award_Type == 'S'], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 03, Column 3
                IGRNT_T = sum(Award_Amount[Award_Category %in% aid_institution & Award_Type == 'I'], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 04, Column 3
                FLOAN_T = sum(Award_Amount[Award_Category %in% aid_federal_loans], na.rm = TRUE),  # IPEDS SFA Part C, Page 2, Line 05a, Column 3

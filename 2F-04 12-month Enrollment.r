@@ -15,6 +15,10 @@ TEST <- TRUE # Comment line for default: FALSE
 
 ir_root <- "L:/IERG"
 
+project_path <- file.path(".")
+input_path <- file.path(project_path, "input")
+output_path <- file.path(project_path, "output")
+
 nsc_path <- file.path(ir_root, "Data", "NSC")
 ipeds_path <- file.path(ir_root, "Data", "IPEDS")
 
@@ -92,6 +96,11 @@ report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1
 report_data_year_start <- as.Date(str_c(report_year-1,"07-01",sep="-"))
 report_data_year_end <- as.Date(str_c(report_year,"06-30",sep="-"))
 
+fn_E12 <- stringr::str_c("ipeds_",report_year,"_",fn_report_code,"_",report_time_str,".txt")
+
+# Now adjust the report year so data collection uses the correct year
+report_year <- report_year + report_year_data_adjustment
+
 ft_cohort_year <- str_c(report_year,"FT")
 pt_cohort_year <- str_c(report_year,"PT")
 tf_cohort_year <- str_c(report_year,"TF")
@@ -99,15 +108,7 @@ tp_cohort_year <- str_c(report_year,"TP")
 rf_cohort_year <- str_c(report_year,"RF")
 rp_cohort_year <- str_c(report_year,"RP")
 
-
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
-
-fn_E12 <- stringr::str_c("ipeds_",report_year,"_",fn_report_code,"_",report_time_str,".txt")
-
-# Now adjust the report year so data collection uses the correct year
-report_year <- report_year + report_year_data_adjustment
+non_summer_term_id <- str_c(report_year, "SU")
 
 #######################################
 #
@@ -213,6 +214,13 @@ student_enrollment_all <- student_term_enrollment %>%
                                                    substring(Status,1,1))),5,6) ) %>%
     select( -c("Term_Cohort","Cohort") )
 
+se_report_year_non_summer_ids <- student_enrollment_all %>%
+    filter( Term_ID != non_summer_term_id ) %>%
+    select( Campus_ID ) %>%
+    distinct()
+
+student_enrollment_all %<>% inner_join( se_report_year_non_summer_ids, by="Campus_ID" )
+
 se_first_term <- student_enrollment_all %>%
     left_join( terms %>% select(Term_ID,Term_Index), by="Term_ID" ) %>%
     group_by( Campus_ID ) %>%
@@ -265,10 +273,12 @@ se_cohorts <- student_enrollment %>%
                         Term_Cohort_Abbrev == "TF" ~ " 2",
                         Term_Cohort_Abbrev == "RF" ~ " 3",
                         Term_Cohort_Abbrev == "NF" ~ " 7",
+                        Term_Cohort_Abbrev == "HF" ~ " 7",
                         Term_Cohort_Abbrev == "PT" ~ "15",
                         Term_Cohort_Abbrev == "TP" ~ "16",
                         Term_Cohort_Abbrev == "RP" ~ "17",
                         Term_Cohort_Abbrev == "NP" ~ "21",
+                        Term_Cohort_Abbrev == "HP" ~ "21",
                         TRUE ~ "00" ),
             LINE_c = if_else(Term_Cohort_Abbrev %in% c("FT","PT","TF","TP","RF","RP"),"1","2") )
 se_cohorts %>% group_by(Credential_Seeker, LINE_c, DE) %>% summarise(n = n(), .groups = "drop")

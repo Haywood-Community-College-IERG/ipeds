@@ -59,7 +59,7 @@ report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
 # Fix report year to be the year of the Fall term
 report_year <- report_year - if_else(report_month < 7, 1, 0)
 
-# Use the current report year to determin the folder for the data
+# Use the current report year to determine the folder for the data
 report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
 
 # Fix report year to be the Override year if provided
@@ -90,6 +90,8 @@ USE_FILE_COHORTS_150 <- report_year_150 < 2018
 USE_FILE_COHORTS_200 <- report_year_200 < 2018
 
 project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+project_path <- "."
+
 #input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
@@ -175,7 +177,7 @@ person <- person <- getColleagueData( "PERSON" ) %>%
                                str_replace(LastName,", Jr", ""), LastName) ) %>%
     mutate( Suffix = str_replace( Suffix, "\\.", "" ) ) %>%
     mutate( FirstName = str_replace( FirstName, "\\.", "" ) ) %>%
-    mutate( LastName = str_replace( FirstName, "\\.", "" ) ) %>%
+    mutate( LastName = str_replace( LastName, "\\.", "" ) ) %>%
     filter( !str_detect(FirstName, "DO NOT USE"),
             !str_detect(toupper(LastName), "ZZZ") ) %>%
     inner_join( ipeds_cohort ) %>%

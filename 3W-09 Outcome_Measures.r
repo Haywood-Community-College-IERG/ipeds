@@ -67,7 +67,8 @@ report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
 report_year_data_start <- report_year
 report_year_data_end <- report_year
 
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+#project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+project_path <- "."
 #input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
@@ -226,6 +227,7 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     inner_join( terms %>% filter( Term_Reporting_Year >= report_year) %>% select(Term_ID, Term_End_Date ) ) %>%
     
     # We are using Cast_Date for the day of graduation
+    mutate( Cast_Date = as.Date(Cast_Date) ) %>%
     mutate( Cast_Date = coalesce(Cast_Date, End_Date) ) %>%
 
         # Fix cast date so that it is not past the end of the term

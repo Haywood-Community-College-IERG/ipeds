@@ -3,15 +3,11 @@ OVERRIDE_REPORT_YEAR <- NA # Set to NA to use current year
 
 WRITE_OUTPUT <- TRUE
 
-
 ir_root <- "L:/IERG"
 
-project_path <- file.path(ir_root,"Reporting","IPEDS","R")
+project_path <- file.path(".")
 input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
-
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
 
 package_date <- "2018-07-01" # date of the CRAN snapshot that the checkpoint
                              # package uses
@@ -84,14 +80,16 @@ onsite_components <- data.frame( Program = c(NA_character_),
                                  stringsAsFactors = FALSE ) %>%
     filter(!is.na(Program))
 
-ignore_programs <- c("BSP", "AHS", "CONED", "=GED", "=HISET", "C11", "C50", "HSEMP", "=HSEMP", "HSEGED")
-include_cips <- data.frame( CIPCODE     = c("46.0499","46.0499","11.0901","11.0901","13.1015","01.0601","24.0199","51.0709","52.0701","52.0701"),
-                            AWLEVEL     = c(     " 2",     " 3",     " 2",     " 3",     " 3",     " 2",     " 3",     " 3",     " 2",     " 3"),
-                            Report_Year = c(   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020") )
+ignore_programs <- c("BSP", "AHS", "CONED", "=GED", "=HISET", "C11", "C50", "HSEMP", "=HSEMP", "HSEGED", "MPHSE")
+include_cips <- data.frame( CIPCODE     = c(  "46.0499",   "46.0499",   "11.0901",   "11.0901",   "13.1015",   "01.0601",   "24.0199",   "51.0709",   "52.0701",   "52.0701"),
+                            AWLEVEL     = c(       " 2",        " 3",        " 2",        " 3",        " 3",        " 2",        " 3",        " 3",        " 2",        " 3"),
+                            Report_Year = c(catalog_year, catalog_year, catalog_year, catalog_year, catalog_year, catalog_year, catalog_year, catalog_year, catalog_year, catalog_year) )
 
 fn_report_code <- "com"
 
-fn_COM <- str_c("ipeds_",report_year,"_",fn_report_code,".txt")
+report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
+
+fn_COM <- stringr::str_c("ipeds_",report_year,"_",fn_report_code,"_",report_time_str,".txt")
 
 #
 # Get all the data from DB
@@ -190,6 +188,7 @@ acad_programs <- getColleagueData( "ACAD_PROGRAMS" ) %>%
             Catalogs = ACPG.CATALOGS ) %>%
     filter( !(Program %in% ignore_programs) ) %>%
     collect() %>%
+    filter( !grepl('^P.*',Program) & !grepl('^T.*',Program) ) %>%
     mutate( Catalog = strsplit(Catalogs, ", ") ) %>%
     unnest( cols = c(Catalog) ) %>%
     select( -Catalogs ) %>%
@@ -232,9 +231,7 @@ acad_programs_ry <- acad_programs %>%
             CRACE13 = "000000", CRACE14 = "000000",
             CRACE15 = "000000", CRACE16 = "000000",
             DistanceED = if_else( Is_Distance == 'Y', 1, 
-                                  if_else( Is_Distance == 'N', 2, NA_real_ ) ),
-            DistanceED31 = if_else( Is_Distance=='Y', Mandatory, NA_real_ ),
-            DistanceED32 = if_else( Is_Distance=='Y', Optional, NA_real_ )
+                                  if_else( Is_Distance == 'N', 2, NA_real_ ) )
     ) %>%
     select( -Is_Distance )
 
@@ -326,6 +323,14 @@ acad_credentials_age_groups <- acad_credentials_base %>%
 acad_credentials <- acad_credentials_base %>%
     left_join( acad_credentials_age_groups )
 
+acad_credentials_programs <- acad_credentials %>%
+    select( CIPCODE, AWLEVEL ) %>%
+    distinct()
+
+include_cips <- active_programs %>%
+    anti_join( acad_credentials_programs, by = c("CIPCODE","AWLEVEL") ) %>%
+    mutate( Report_Year = catalog_year )
+
 race_gender_cols <- c( CRACE01=NA_character_, CRACE02=NA_character_,
                        CRACE25=NA_character_, CRACE26=NA_character_,
                        CRACE27=NA_character_, CRACE28=NA_character_,
@@ -345,7 +350,7 @@ com_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character
                  race_gender_cols )
 com_b_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  MAJORNUM=NA_character_, CIPCODE=NA_character_, AWLEVEL=NA_character_, 
-                 DistanceED=NA_character_, DistanceED31=NA_character_, DistanceED32=NA_character_ )
+                 DistanceED=NA_character_ )
 com_c_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  race_gender_cols )
 com_d_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
@@ -365,10 +370,8 @@ include_cips_b <- include_cips %>%
     filter( Report_Year == report_year ) %>%
     select( -Report_Year ) %>%
     mutate( MAJORNUM = 1,
-            DistanceED=2, 
-            DistanceED31=" ", 
-            DistanceED32=" " ) %>%
-    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED, DistanceED31, DistanceED32 )
+            DistanceED=2 ) %>%
+    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED )
 
 #
 # Create the cohort row
@@ -407,18 +410,12 @@ ipeds_programs <- ipeds_com_a %>%
 ipeds_com_b_base <- acad_credentials %>%
     distinct() %>%
     mutate( DistanceED = if_else( Is_Distance == 'Y', 1, 
-                                  if_else( Is_Distance == 'N', 2, NA_real_ ) ),
-            DistanceED31 = if_else( DistanceED==3, Mandatory, NA_real_ ),
-            DistanceED32 = if_else( DistanceED==3, Optional, NA_real_ )
+                                  if_else( Is_Distance == 'N', 2, NA_real_ ) )
     ) %>%
     group_by( MAJORNUM, CIPCODE, AWLEVEL ) %>%
-    summarise( DistanceED = min(DistanceED),
-               DistanceED31 = max(DistanceED31),
-               DistanceED32 = max(DistanceED32)
+    summarise( DistanceED = min(DistanceED)
                ) %>%
     ungroup() %>%
-    mutate( DistanceED31 = coalesce(as.character(DistanceED31),' '),
-            DistanceED32 = coalesce(as.character(DistanceED32),' ') ) %>%
     bind_rows( include_cips_b ) %>%
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
@@ -427,9 +424,7 @@ ipeds_com_b_base <- acad_credentials %>%
 
 ipeds_com_b_missing <- acad_programs_ry %>%
     anti_join( ipeds_com_a_base, by = c("CIPCODE","AWLEVEL") ) %>%
-    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED, DistanceED31, DistanceED32 ) %>% 
-    mutate( DistanceED31 = coalesce(as.character(DistanceED31),' '),
-            DistanceED32 = coalesce(as.character(DistanceED32),' ') ) %>%
+    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED ) %>% 
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
             PART = 'B' ) %>%
