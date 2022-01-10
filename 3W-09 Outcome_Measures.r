@@ -2,69 +2,21 @@
 ### Define GLOBAL USER variables
 ###
 
-OVERRIDE_REPORT_YEAR <- 2010 # Set to NA for current year
-WRITE_OUTPUT <- FALSE
+#OVERRIDE_REPORT_YEAR <- 2010 # Set to NA for current year
+WRITE_OUTPUT <- TRUE
+
+ir_root <- "L:/IERG"
+
+nsc_path <- file.path(ir_root, "Data", "NSC")
+ipeds_path <- file.path(ir_root, "Data", "IPEDS")
+
+cohort_from_file_year <- 2015
 
 ###
 ### End GLOBAL USER variables
 ###
 
-### 
-### Define common report variables
-###
-if (!exists("OVERRIDE_REPORT_YEAR")) {
-    OVERRIDE_REPORT_YEAR <- NA_integer_
-}
-
-ir_root <- "L:/IERG"
-
-package_date <- "2018-07-01" # date of the CRAN snapshot that the checkpoint package uses
-
-project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
-
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
-
-current_year <- as.numeric(format(Sys.time(), "%Y"))
-current_month <- as.numeric(format(Sys.time(), "%m"))
-
-# Fix report year to be the year of the Fall term
-report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
-                       OVERRIDE_REPORT_YEAR,
-                       as.integer(current_year- ifelse(current_month < 7, 1, 0)) - 8 )
-
-# We get one additional year if we need change from last year
-report_year_data_start <- report_year
-report_year_data_end <- report_year
-
-fn_OM1 <- stringr::str_c("ipeds_",report_year + 8,"_om1.test.txt")
-
-###
-### Start local variables
-###
-
-
-###
-### End local variables
-###
-
-# if checkpoint is not yet installed, install it (for people using this
-# system for the first time)
-# if (!require(checkpoint)) {
-#     install.packages("checkpoint")
-#     require(checkpoint)
-# }
-
-# This is commented out because it is not working correctly at this time.
-# install packages for the specified CRAN snapshot date
-# checkpoint(snapshotDate = package_date,
-#            checkpointLocation = ir_root,
-#            project = project_path,
-#            verbose = T,
-#            scanForPackages = T,
-#            use.knitr = F)
+package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint package uses
 
 require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
 require(magrittr) # pipes
@@ -74,10 +26,8 @@ require(odbc)
 require(yaml)
 
 # Enter local packages needed for this particular script 
-#library(data.table)
-
 if (!require(haywoodcc)) {
-    devtools::install_git("https://github.com/hcc-donder/haywoodcc.git", git="external")
+    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
     require(haywoodcc)
 }
 
@@ -85,11 +35,43 @@ sessionInfo()
 
 # Now, load the campus configuration
 cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-scripts_path <- cfg$R$scripts_path
-if (str_sub(scripts_path, -1) == "/") {
-    scripts_path = str_sub(scripts_path, 1, -2 )
+
+### 
+### Define common report variables
+###
+if (!exists("OVERRIDE_REPORT_YEAR")) {
+    OVERRIDE_REPORT_YEAR <- NA_integer_
 }
 
+if (!exists("WRITE_OUTPUT")) {
+    WRITE_OUTPUT <- NA_integer_
+}
+
+report_year_data_adjustment <- 8
+
+current_year <- as.numeric(format(Sys.time(), "%Y"))
+current_month <- as.numeric(format(Sys.time(), "%m"))
+
+report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
+
+# Fix report year to be the year of the Fall term
+report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
+report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
+
+# Fix report year to be the correct year for the data (or the OVERRIDE value)
+report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
+                       OVERRIDE_REPORT_YEAR,
+                       report_year - report_year_data_adjustment )
+
+# We get one additional year if we need change from last year
+report_year_data_start <- report_year
+report_year_data_end <- report_year
+
+project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+#input_path <- file.path(project_path, "input")
+output_path <- file.path(project_path, "output")
+
+fn_OM1 <- stringr::str_c("ipeds_",report_year + report_year_data_adjustment,"_om1_",report_time_str,".txt")
 
 
 #
@@ -116,18 +98,29 @@ credential_terms <- terms %>%
             Term_Reporting_Year <= report_year + 7 )
 
 ###
-### Get Cohort data from ipeds_cohorts.csv
+### Get Cohort data from Colleague if year is before 2018, otherwise get it from ipeds_cohorts.csv
 ###
-ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema = "local", version = "history" ) %>%
-    select( ID, Term_ID, Cohort=OM_Cohort ) %>%
-    collect() %>%
-    inner_join( terms %>% 
-                    select(Term_ID,
-                           Cohort_Year=Term_Reporting_Year,
-                           Cohort_Start_Date=Term_Start_Date) ) %>%
-    filter( !is.na(Cohort),
-            Cohort_Year == report_year )
-
+# if (report_year < cohort_from_file_year) {
+#     student_acad_levels <- getColleagueData( "STUDENT_ACAD_LEVELS" ) %>%
+#         #filter( STA.FED.COHORT.GROUP == report_cohort ) %>%
+#         select( ID=STA.STUDENT, Cohort=STA.FED.COHORT.GROUP ) %>%
+#         collect() %>%
+#         mutate( Term_ID = str_c(substring(Cohort,1,4),"FA") ) %>%
+#         inner_join( terms %>% 
+#                         select(Term_ID,
+#                                Cohort_Year=Term_Reporting_Year,
+#                                Cohort_Start_Date=Term_Start_Date) )
+# } else {
+    ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema = "local", version = "history" ) %>%
+        select( ID, Term_ID, Cohort=OM_Cohort ) %>%
+        collect() %>%
+        inner_join( terms %>% 
+                        select(Term_ID,
+                               Cohort_Year=Term_Reporting_Year,
+                               Cohort_Start_Date=Term_Start_Date) ) %>%
+        filter( !is.na(Cohort),
+                Cohort_Year == report_year )
+#}
 
 # ipeds_cohorts <- read_csv(file.path(ipeds_path,"ipeds_cohorts.csv")) %>%
 #     select( ID, Term_ID, Cohort=OM_Cohort ) %>%

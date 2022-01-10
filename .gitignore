@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+/input
+/output
+/nsc
+=======
 .Rproj.user
 .Rhistory
 .RData
@@ -6,3 +11,4 @@
 /data-raw/early_college_programs.csv
 /data-raw/ccp_programs.csv
 /.Renviron
+>>>>>>> 76885c9345e0d7c6c4aca419a94e5f72749c778a

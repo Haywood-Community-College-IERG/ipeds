@@ -78,6 +78,17 @@ distance_programs <- data.frame( Major = c( "10100", "25800", "25120", "55180", 
                                  stringsAsFactors = FALSE ) %>%
     mutate( Is_Distance = 'Y' )
 
+onsite_components <- data.frame( Program = c(NA_character_),
+                                 Mandatory = c(NA_character_),
+                                 Optional = c(NA_character_),
+                                 stringsAsFactors = FALSE ) %>%
+    filter(!is.na(Program))
+
+ignore_programs <- c("BSP", "AHS", "CONED", "=GED", "=HISET", "C11", "C50", "HSEMP", "=HSEMP", "HSEGED")
+include_cips <- data.frame( CIPCODE     = c("46.0499","46.0499","11.0901","11.0901","13.1015","01.0601","24.0199","51.0709","52.0701","52.0701"),
+                            AWLEVEL     = c(     " 2",     " 3",     " 2",     " 3",     " 3",     " 2",     " 3",     " 3",     " 2",     " 3"),
+                            Report_Year = c(   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020",   "2020") )
+
 fn_report_code <- "com"
 
 fn_COM <- str_c("ipeds_",report_year,"_",fn_report_code,".txt")
@@ -92,12 +103,13 @@ person <- getColleagueData( "PERSON" ) %>%
             Last_Name = LAST.NAME, 
             Birth_Date = BIRTH.DATE,
             Gender = GENDER, 
-            ETHNIC, PER.ETHNICS, 
-            PER.RACES, 
-            X.ETHNICS.RACES, 
+            ETHNIC, 
             CITIZENSHIP, 
             RESIDENCE.COUNTRY, 
-            VISA.TYPE ) %>%
+            VISA.TYPE, 
+            PER.ETHNICS, 
+            PER.RACES, 
+            X.ETHNICS.RACES ) %>%
     collect() %>%
     mutate( CITIZENSHIP = if_else( CITIZENSHIP == "USA", "", CITIZENSHIP ) ) %>%
     mutate( IPEDS_Race = case_when(
@@ -149,15 +161,22 @@ person <- getColleagueData( "PERSON" ) %>%
 # Need to get all programs to match on credentials earned, but then need to filter list of programs
 # to those offered during report year as they all need to be reported.
 #
-# Do we need to report the programs we don't offer?
-#
+acad_programs__user <- getColleagueData( "ACAD_PROGRAMS__USER" ) %>%
+    select( Program = USER.ACPG.PROGRAMS.ID,
+            Online_Type = USER.ACPG.ONLINE ) %>%
+    collect() %>%
+    mutate( Online_Type = case_when(
+                Online_Type == "OO" ~ 3,
+                Online_Type == "OF" ~ 2,
+                TRUE ~ 0) )
+
 acad_program_reqmts_all <- getColleagueData( "ACAD_PROGRAM_REQMTS" ) %>%
     select( Program = ACPR.ACAD.PROGRAM,
             Catalog = ACPR.CATALOG,
             Credit_Hours = ACPR.CRED ) %>%
     collect() %>%
     filter( substring(Program,1,1) %in% c('A','D','C') )
-
+    
 acad_program_reqmts_ry <- acad_program_reqmts_all %>%
     filter( Catalog == catalog_year ) %>%
     mutate( Current_Program = "Yes" ) %>%
@@ -166,27 +185,41 @@ acad_program_reqmts_ry <- acad_program_reqmts_all %>%
 acad_programs <- getColleagueData( "ACAD_PROGRAMS" ) %>%
     select( Program = ACAD.PROGRAMS.ID,
             Program_Length = ACPG.CMPL.MONTHS,
-            Major = ACPG.MAJORS,
             CIPCODE = ACPG.CIP,
+            Major = ACPG.MAJORS,
             Catalogs = ACPG.CATALOGS ) %>%
-    filter( !(Program %in% c('BSP', 'AHS', 'CONED', '=GED', '=HISET', 'C11', 'C50')) ) %>%
+    filter( !(Program %in% ignore_programs) ) %>%
     collect() %>%
     mutate( Catalog = strsplit(Catalogs, ", ") ) %>%
-    unnest() %>%
+    unnest( cols = c(Catalog) ) %>%
     select( -Catalogs ) %>%
     left_join( acad_program_reqmts_all ) %>%
+    left_join( acad_programs__user, by=c("Program") ) %>%
     mutate( AWLEVEL = case_when(
-                          substring(Program,1,1) == 'A' ~ "03",
-                          substring(Program,1,1) == 'D' ~ "02",
-                          substring(Program,1,1) == 'C' ~ "01",
-                          TRUE ~ '9') ) %>%
+                          substring(Program,1,1) == 'A' ~ " 3",
+                          substring(Program,1,1) == 'D' ~ " 2",
+                          substring(Program,1,1) == 'C' ~ "1b",
+                          TRUE ~ '9'),
+            Online_Type = coalesce(Online_Type,0) ) %>%
     left_join( distance_programs ) %>%
-    mutate( Is_Distance = coalesce(Is_Distance,'N') )
+    mutate( Is_Distance = coalesce(Is_Distance,'N') ) %>%
+    left_join(onsite_components, by="Program") %>%
+    mutate( Mandatory = if_else(coalesce(Mandatory,'N')=='Y',1,0),
+            Optional = if_else(coalesce(Optional,'N')=='Y',1,0) )
+
+active_programs <- acad_programs %>%
+    filter( Catalog == catalog_year ) %>%
+    select( CIPCODE, AWLEVEL ) %>%
+    distinct() %>%
+    arrange( CIPCODE )
 
 acad_programs_ry <- acad_programs %>%
     inner_join( acad_program_reqmts_ry ) %>%
-    select( CIPCODE, AWLEVEL, Is_Distance ) %>%
+    select( CIPCODE, AWLEVEL, Is_Distance, Mandatory, Optional ) %>%
     distinct() %>%
+    group_by( CIPCODE, AWLEVEL, Is_Distance ) %>%
+    summarise( Mandatory = max(Mandatory),
+               Optional = max(Optional) ) %>%
     mutate( MAJORNUM = 1, 
             CRACE01 = "000000", CRACE02 = "000000",
             CRACE25 = "000000", CRACE26 = "000000",
@@ -199,9 +232,11 @@ acad_programs_ry <- acad_programs %>%
             CRACE13 = "000000", CRACE14 = "000000",
             CRACE15 = "000000", CRACE16 = "000000",
             DistanceED = if_else( Is_Distance == 'Y', 1, 
-                                  if_else( Is_Distance == 'N', 2, NA_real_ ) )
-        )
-
+                                  if_else( Is_Distance == 'N', 2, NA_real_ ) ),
+            DistanceED31 = if_else( Is_Distance=='Y', Mandatory, NA_real_ ),
+            DistanceED32 = if_else( Is_Distance=='Y', Optional, NA_real_ )
+    ) %>%
+    select( -Is_Distance )
 
 # student_programs_dates <- getColleagueData( "STUDENT_PROGRAMS__STPR_DATES", version="Full" ) %>%
 #     filter( ItemNumber == 1 ) %>%
@@ -226,7 +261,7 @@ acad_credentials_base <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
             ACAD.CAST.DATE >= report_data_year_start,
             ACAD.CAST.DATE <= report_data_year_end,
             ( !is.na(ACAD.DEGREE.DATE) | !is.na(ACAD.CCD.DATE) ),   # DMO A 191105
-            !(ACAD.ACAD.PROGRAM %in% c("AHS", "=GED", "HSEGED")) ) %>%
+            !(ACAD.ACAD.PROGRAM %in% ignore_programs) ) %>%
     select( Student_ID = ACAD.PERSON.ID,
             Term_ID = ACAD.TERM, 
             Program = ACAD.ACAD.PROGRAM,
@@ -256,13 +291,13 @@ acad_credentials_base <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
                         # Student_ID == "XXXX" & Term_ID == "XXXX" & Program == "XXXX" ~ "",
                         TRUE ~ CIPCODE ),
             AWLEVEL = case_when( 
-                        Student_ID == "1149818" & Term_ID == "2018SU" & Program == "A10100EC" ~ "03",
-                        Student_ID == "1024339" & Term_ID == "2017SU" & Program == "A30140" ~ "03",
-                        Student_ID == "1021104" & Term_ID == "2017SU" & Program == "A30300" ~ "03",
-                        Student_ID == "1101800" & Term_ID == "2017SU" & Program == "A30300" ~ "03",
-                        Student_ID == "1062698" & Term_ID == "2017SU" & Program == "A40200" ~ "03",
-                        Student_ID == "1075372" & Term_ID == "2017SU" & Program == "A55220" ~ "03",
-                        Student_ID == "1101713" & Term_ID == "2017SU" & Program == "A55280" ~ "03",
+                        Student_ID == "1149818" & Term_ID == "2018SU" & Program == "A10100EC" ~ " 3",
+                        Student_ID == "1024339" & Term_ID == "2017SU" & Program == "A30140" ~ " 3",
+                        Student_ID == "1021104" & Term_ID == "2017SU" & Program == "A30300" ~ " 3",
+                        Student_ID == "1101800" & Term_ID == "2017SU" & Program == "A30300" ~ " 3",
+                        Student_ID == "1062698" & Term_ID == "2017SU" & Program == "A40200" ~ " 3",
+                        Student_ID == "1075372" & Term_ID == "2017SU" & Program == "A55220" ~ " 3",
+                        Student_ID == "1101713" & Term_ID == "2017SU" & Program == "A55280" ~ " 3",
                         TRUE ~ AWLEVEL ),
             Is_Distance = case_when( 
                         Student_ID == "1149818" & Term_ID == "2018SU" & Program == "A10100EC" ~ "Y",
@@ -310,13 +345,30 @@ com_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character
                  race_gender_cols )
 com_b_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  MAJORNUM=NA_character_, CIPCODE=NA_character_, AWLEVEL=NA_character_, 
-                 DistanceED=NA_character_ )
+                 DistanceED=NA_character_, DistanceED31=NA_character_, DistanceED32=NA_character_ )
 com_c_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  race_gender_cols )
 com_d_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  CTLEVEL=NA_character_, gender_cols, Filler_1=NA_character_, 
                  race_cols, Filler_2=NA_character_, age_cols )
 
+include_cips_a <- include_cips %>%
+    filter( Report_Year == report_year ) %>%
+    select( -Report_Year ) %>%
+    mutate( q=1 ) %>%
+    left_join( tibble(IPEDS_Race_Gender_Code = names(race_gender_cols)) %>% mutate(q=1), by="q" ) %>%
+    mutate( MAJORNUM = 1,
+            Students = "000000" ) %>%
+    select( MAJORNUM, CIPCODE, AWLEVEL, IPEDS_Race_Gender_Code, Students )
+
+include_cips_b <- include_cips %>%
+    filter( Report_Year == report_year ) %>%
+    select( -Report_Year ) %>%
+    mutate( MAJORNUM = 1,
+            DistanceED=2, 
+            DistanceED31=" ", 
+            DistanceED32=" " ) %>%
+    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED, DistanceED31, DistanceED32 )
 
 #
 # Create the cohort row
@@ -326,6 +378,7 @@ ipeds_com_a_base <- acad_credentials %>%
     group_by( MAJORNUM, CIPCODE, AWLEVEL, IPEDS_Race_Gender_Code ) %>%
     mutate( student = 1 ) %>%
     summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    bind_rows( include_cips_a ) %>%
     spread( IPEDS_Race_Gender_Code, Students, fill="000000" ) %>%
     ungroup() %>%
     add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
@@ -333,14 +386,14 @@ ipeds_com_a_base <- acad_credentials %>%
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
             PART = 'A' ) %>%
-    select_( .dots=names(com_a_cols) )
+    select( all_of(names(com_a_cols)) ) # select_( .dots=names(com_a_cols) )
 
 ipeds_com_a_missing <- acad_programs_ry %>%
     anti_join( ipeds_com_a_base, by = c("CIPCODE","AWLEVEL","MAJORNUM") ) %>%
     mutate( UNITID = '198668',
         SURVSECT = 'COM',
         PART = 'A' ) %>%
-    select_( .dots=names(com_a_cols) )
+    select( all_of(names(com_a_cols)) ) # select_( .dots=names(com_a_cols) )
 
 ipeds_com_a <- bind_rows( ipeds_com_a_base, ipeds_com_a_missing ) %>%
     arrange( CIPCODE, AWLEVEL )
@@ -348,27 +401,39 @@ ipeds_com_a <- bind_rows( ipeds_com_a_base, ipeds_com_a_missing ) %>%
 ipeds_programs <- ipeds_com_a %>%
     select( CIPCODE, AWLEVEL ) %>%
     group_by( CIPCODE ) %>%
-    summarise_each(funs(paste(., collapse = ", ")))
+    # summarise_each(funs(paste(., collapse = ", "))) %>%
+    summarise( across( .fns = ~ paste(.x, collapse = ", ") ) )
 
 ipeds_com_b_base <- acad_credentials %>%
     distinct() %>%
     mutate( DistanceED = if_else( Is_Distance == 'Y', 1, 
-                                  if_else( Is_Distance == 'N', 2, NA_real_ ) ) ) %>%
+                                  if_else( Is_Distance == 'N', 2, NA_real_ ) ),
+            DistanceED31 = if_else( DistanceED==3, Mandatory, NA_real_ ),
+            DistanceED32 = if_else( DistanceED==3, Optional, NA_real_ )
+    ) %>%
     group_by( MAJORNUM, CIPCODE, AWLEVEL ) %>%
-    summarise( DistanceED = min(DistanceED) ) %>%
+    summarise( DistanceED = min(DistanceED),
+               DistanceED31 = max(DistanceED31),
+               DistanceED32 = max(DistanceED32)
+               ) %>%
     ungroup() %>%
+    mutate( DistanceED31 = coalesce(as.character(DistanceED31),' '),
+            DistanceED32 = coalesce(as.character(DistanceED32),' ') ) %>%
+    bind_rows( include_cips_b ) %>%
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
             PART = 'B' ) %>%
-    select_( .dots=names(com_b_cols) )
+    select( all_of(names(com_b_cols)) ) # select_( .dots=names(com_b_cols) )
 
 ipeds_com_b_missing <- acad_programs_ry %>%
     anti_join( ipeds_com_a_base, by = c("CIPCODE","AWLEVEL") ) %>%
-    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED ) %>% 
+    select( MAJORNUM, CIPCODE, AWLEVEL, DistanceED, DistanceED31, DistanceED32 ) %>% 
+    mutate( DistanceED31 = coalesce(as.character(DistanceED31),' '),
+            DistanceED32 = coalesce(as.character(DistanceED32),' ') ) %>%
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
             PART = 'B' ) %>%
-    select_( .dots=names(com_b_cols) )
+    select( all_of(names(com_b_cols)) ) # select_( .dots=names(com_b_cols) )
 
 ipeds_com_b <- bind_rows( ipeds_com_b_base, ipeds_com_b_missing ) %>%
     arrange( CIPCODE, AWLEVEL )
@@ -386,11 +451,11 @@ ipeds_com_c <- acad_credentials %>%
     mutate( UNITID = '198668',
             SURVSECT = 'COM',
             PART = 'C' ) %>%
-    select_( .dots=names(com_c_cols) )
+    select( all_of(names(com_c_cols)) ) # select_( .dots=names(com_c_cols) )
 
 ipeds_com_d_race <- acad_credentials %>%
     select( Student_ID, IPEDS_Race_Code, CTLEVEL = AWLEVEL ) %>%
-    mutate( CTLEVEL = substring(CTLEVEL,2,2) ) %>%
+    mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
     group_by( CTLEVEL, IPEDS_Race_Code ) %>%
     mutate( student = 1 ) %>%
@@ -405,7 +470,7 @@ ipeds_com_d_race <- acad_credentials %>%
 
 ipeds_com_d_gender <- acad_credentials %>%
     select( Student_ID, SEX, CTLEVEL = AWLEVEL ) %>%
-    mutate( CTLEVEL = substring(CTLEVEL,2,2) ) %>%
+    mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
     group_by( CTLEVEL, SEX ) %>%
     mutate( student = 1 ) %>%
@@ -420,7 +485,7 @@ ipeds_com_d_gender <- acad_credentials %>%
 
 ipeds_com_d_age <- acad_credentials %>%
     select( Student_ID, Age_Group, CTLEVEL = AWLEVEL ) %>%
-    mutate( CTLEVEL = substring(CTLEVEL,2,2) ) %>%
+    mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
     group_by( CTLEVEL, Age_Group ) %>%
     mutate( student = 1 ) %>%
@@ -438,7 +503,7 @@ ipeds_com_d <- ipeds_com_d_race %>%
     left_join( ipeds_com_d_gender ) %>%
     mutate( Filler_1 = "      ",
             Filler_2 = "      " ) %>%
-    select_( .dots=names(com_d_cols) )
+    select( all_of(names(com_d_cols)) ) # select_( .dots=names(com_d_cols) )
 
 ## 
 ## Write out the Graduation Rate table for importing into IPEDS

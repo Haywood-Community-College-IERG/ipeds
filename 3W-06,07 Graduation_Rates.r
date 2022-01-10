@@ -1,34 +1,17 @@
-#OVERRIDE_REPORT_YEAR <- 2018 # Set to NA to use current year
+OVERRIDE_REPORT_YEAR <- 2018 # Set to NA to use current year
+#OVERRIDE_COHORTS <- TRUE
 
-WRITE_OUTPUT <- FALSE
-
+WRITE_OUTPUT <- TRUE
 
 ir_root <- "L:/IERG"
-
-project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
 
 nsc_path <- file.path(ir_root, "Data", "NSC")
 ipeds_path <- file.path(ir_root, "Data", "IPEDS")
 
-package_date <- "2018-07-01" # date of the CRAN snapshot that the checkpoint
-                             # package uses
+cohort_from_file_year <- 2015
 
-# if checkpoint is not yet installed, install it (for people using this
-# system for the first time)
-# if (!require(checkpoint)) {
-#     install.packages("checkpoint")
-#     require(checkpoint)
-# }
-# 
-# # install packages for the specified CRAN snapshot date
-# checkpoint(snapshotDate = package_date,
-#            checkpointLocation = ir_root,
-#            project = project_path,
-#            verbose = T,
-#            scanForPackages = T,
-#            use.knitr = F)
+package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint
+                             # package uses
 
 library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
 library(magrittr) # pipes
@@ -36,6 +19,7 @@ library(stringr) # string manipulation
 library(dbplyr)
 library(odbc)
 library(yaml)
+library(lubridate)
 
 # Enter local packages needed for this particular script 
 if (!require(haywoodcc)) {
@@ -48,26 +32,13 @@ sessionInfo()
 
 # Now, load the campus configuration
 cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-scripts_path <- cfg$R$scripts_path
-if (str_sub(scripts_path, -1) == "/") {
-    scripts_path = str_sub(scripts_path, 1, -2 )
-}
-
-# if you want to outsource logic to other script files, see README for 
-# further information
-source(file.path(scripts_path, "informer.R"))
-
-# Define some functions that are used frequently
-"%nin%" <- function(x, y) !(x %in% y) 
-
-"%||%" <- function(a, b) if (!is.null(a)) a else b # From scales/date-time.r
-
-coalesce_blanks <- function( var, default = '' ) {
-    return( if_else( is.na(var) | var == '', default, var ) )
-}
 
 if (!exists("OVERRIDE_REPORT_YEAR")) {
     OVERRIDE_REPORT_YEAR <- NA_integer_
+}
+
+if (!exists("OVERRIDE_COHORTS")) {
+    OVERRIDE_COHORTS <- NA_integer_
 }
 
 if (!exists("WRITE_OUTPUT")) {
@@ -82,9 +53,16 @@ report_year <- as.numeric(format(Sys.time(), "%Y"))
 # Otherwise, set to -1
 report_month <- as.numeric(format(Sys.time(), "%m"))
 
+# For file names
+report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
+
 # Fix report year to be the year of the Fall term
 report_year <- report_year - if_else(report_month < 7, 1, 0)
 
+# Use the current report year to determin the folder for the data
+report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
+
+# Fix report year to be the Override year if provided
 report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year)
 
 # For spring and summer terms, set report year to fall's year
@@ -106,13 +84,19 @@ report_cutoff_date <- as.Date(str_c(report_year,"08-31",sep="-"))
 #nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*(", report_year_150, "|", report_year_200, ")fa.*csv")
 nsc_detail_pat <- str_c("(", report_year_150, "|", report_year_200, ")fa",
                         "_DETLRPT_SE_.*.csv")
+# nsc_detail_pat <- str_c("hcc_ipeds_g2_",report_year,"_se")
 nsc_folder <- "nsc"
 
-USE_FILE_COHORTS_150 <- report_year_150 < 2018
-USE_FILE_COHORTS_200 <- report_year_200 < 2018
+USE_FILE_COHORTS_150 <- report_year_150 < cohort_from_file_year
+USE_FILE_COHORTS_200 <- report_year_200 < cohort_from_file_year
 
-fn_G2 <- str_c("ipeds_",report_year,"_g2.txt")
-fn_G22 <- str_c("ipeds_",report_year,"_g22.txt")
+#project_path <- file.path(ir_root,"Reporting","IPEDS","R")
+project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+#input_path <- file.path(project_path, "input")
+output_path <- file.path(project_path, "output")
+
+fn_G2 <- str_c("ipeds_",report_year,"_g2_",report_time_str,".txt")
+fn_G22 <- str_c("ipeds_",report_year,"_g22_",report_time_str,".txt")
 
 #
 # Get all the data from DB
@@ -154,13 +138,32 @@ terms %<>%
             Term_Start_Date <= report_cutoff_date ) %>%
     arrange( Term_Start_Date )    
 
-ipeds_cohort_FILE_COHORTS <- read_csv( file.path(input_path,"ipeds.cohorts.csv") ) %>%
+#
+# Use the old cohort value for years prior to 2018. 
+# After that, the IPEDS reports all used the one generated outside of Colleague.
+#
+ipeds_cohort_COLLEAGUE_COHORTS2 <- getColleagueData( "STUDENT_ACAD_LEVELS" ) %>%
+    filter( STA.FED.COHORT.GROUP %in% c(report_cohorts) ) %>%
+    select( ID=STA.STUDENT, Cohort=STA.FED.COHORT.GROUP ) %>%
+    collect() %>%
+    mutate( IPEDS_Report = if_else(Cohort==report_ftft_150,150,200),
+            Term_ID = str_c(substring(Cohort,1,4),"FA") ) %>%
+    inner_join( report_terms %>% 
+                    filter( ( (Term_Reporting_Year==report_year_150) & (report_year_150 < 2018)) |
+                                ( (Term_Reporting_Year==report_year_200) & (report_year_200 < 2018)) ) %>%
+                    select(Term_ID, Cohort_Start_Date = Term_Start_Date) )
+
+ipeds_cohort_FILE_COHORTS <- getColleagueData( "ipeds_cohorts", schema="local" ) %>%
+    select( ID, Cohort = Term_Cohort, Term_ID ) %>%
     filter( Cohort %in% c(report_cohorts) ) %>%
+    distinct() %>%
+    collect() %>%
     mutate( IPEDS_Report = if_else(Cohort==report_ftft_150,150,200) ) %>%
     inner_join( report_terms %>% 
-                    filter( ( (Term_Reporting_Year==report_year_150) & USE_FILE_COHORTS_150 ) |
-                                ( (Term_Reporting_Year==report_year_200) & USE_FILE_COHORTS_200 ) ) %>%
+                    filter( ( (Term_Reporting_Year == report_year_150 ) & USE_FILE_COHORTS_150 ) |
+                                (Term_Reporting_Year == report_year_200 ) & USE_FILE_COHORTS_200 ) %>%
                     select(Term_ID, Cohort_Start_Date = Term_Start_Date) ) #%>%
+
 
 ipeds_cohort_COLLEAGUE_COHORTS <- getColleagueData( "STUDENT_TERMS" ) %>%
     select( ID = STTR.STUDENT, Cohort = STTR.FED.COHORT.GROUP ) %>%
@@ -475,7 +478,8 @@ ipeds_g2_b_10 <- ipeds_terms %>%
             Filler1 = ' ',
             Filler2 = '     ',
             Filler3 = ' ' ) %>%
-    select_( .dots=names(g2_b_cols) )
+    select( !! names(g2_b_cols) )
+#    select_( .dots=names(g2_b_cols) )
 
 ipeds_g2_b <- ipeds_terms %>%
     filter( IPEDS_Report == 150 ) %>%
@@ -512,7 +516,8 @@ ipeds_g2_b <- ipeds_terms %>%
             Filler1 = ' ',
             Filler2 = '     ',
             Filler3 = ' ' ) %>%
-    select_( .dots=names(g2_b_cols) ) %>%
+    select( !! names(g2_b_cols) ) %>%
+    # select_( .dots=names(g2_b_cols) ) %>%
     bind_rows( ipeds_g2_b_10 ) %>%
     arrange( LINE )
 
@@ -620,6 +625,8 @@ ipeds_g22_a <- ipeds_terms %>%
     left_join( ipeds_terms_grads ) %>%
     mutate( Status_Type = case_when(
         Graduation_Date <= Term_Start_Date ~ case_when(
+            Grad_Time %in% c('100') ~ 'COMPY4_100',
+            Grad_Time %in% c('150') ~ 'COMPY4_150',
             Grad_Time %in% c('200') ~ 'COMPY4',
             TRUE ~ 'ZZZZ99'
         ),
@@ -641,7 +648,8 @@ ipeds_g22_a <- ipeds_terms %>%
             ADEXCL = '000000' ) %>% # TODO: Need to find exclusions next time!
     add_column( !!!g22_a_cols[!names(g22_a_cols) %in% names(.)] ) %>%
     mutate_at(.vars=names(g22_a_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
-    select_( .dots=names(g22_a_cols) )
+    select( !! names(g22_a_cols) )
+    # select_( .dots=names(g22_a_cols) )
 
 ## Write out the Graduation Rate tables for importing into IPEDS
 if (WRITE_OUTPUT) {

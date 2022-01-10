@@ -1,17 +1,19 @@
-OVERRIDE_REPORT_YEAR <- NA # Set to NA for current academic year's fall term
-#OVERRIDE_REPORT_YEAR <- 2017 # Set to NA for current academic year's fall term
+###
+### Define GLOBAL USER variables
+###
 
-WRITE_OUTPUT <- TRUE #WRITE_OUTPUT <- FALSE
-CLEANUP <- FALSE #TRUE
-TEST <- TRUE #FALSE
+fn_report_code <- "e12"
+report_year_data_adjustment <- -1
+
+#OVERRIDE_REPORT_YEAR <- 2017 #  Comment for current academic year's fall term
+
+WRITE_OUTPUT <- TRUE # Comment line for default: FALSE
+CLEANUP <- FALSE # Comment line for default: TRUE
+TEST <- TRUE # Comment line for default: FALSE
 
 # TODO: Faculty/Student Ratio
 
 ir_root <- "L:/IERG"
-
-project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
 
 nsc_path <- file.path(ir_root, "Data", "NSC")
 ipeds_path <- file.path(ir_root, "Data", "IPEDS")
@@ -58,27 +60,54 @@ if (str_sub(scripts_path, -1) == "/") {
     scripts_path = str_sub(scripts_path, 1, -2 )
 }
 
+### 
+### Define common report variables
+###
+if (!exists("OVERRIDE_REPORT_YEAR")) {
+    OVERRIDE_REPORT_YEAR <- NA_integer_
+}
+
+if (!exists("WRITE_OUTPUT")) {
+    WRITE_OUTPUT <- NA_integer_
+}
+if (!exists("CLEANUP")) {
+    CLEANUP <- NA_integer_
+}
+if (!exists("TEST")) {
+    TEST <- NA_integer_
+}
+
 ###
 ### Define some local variables
 ###
-report_year <- as.numeric(format(Sys.time(), "%Y"))
+current_year <- as.numeric(format(Sys.time(), "%Y"))
+current_month <- as.numeric(format(Sys.time(), "%m"))
 
-# Set report_month to actual month to allow adjustment of report_year based on month
-# Otherwise, set to -1
-report_month <- as.numeric(format(Sys.time(), "%m"))
+report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
 
-# Fix report year to be the year of the Fall term
-report_year <- report_year - if_else(report_month < 7, 1, 0)
-
+report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
 report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year)
+report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
 
 report_data_year_start <- as.Date(str_c(report_year-1,"07-01",sep="-"))
 report_data_year_end <- as.Date(str_c(report_year,"06-30",sep="-"))
 
-fn_report_code <- "e12"
+ft_cohort_year <- str_c(report_year,"FT")
+pt_cohort_year <- str_c(report_year,"PT")
+tf_cohort_year <- str_c(report_year,"TF")
+tp_cohort_year <- str_c(report_year,"TP")
+rf_cohort_year <- str_c(report_year,"RF")
+rp_cohort_year <- str_c(report_year,"RP")
 
-fn_E12 <- str_c("ipeds_",report_year,"_",fn_report_code,".txt")
 
+project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+input_path <- file.path(project_path, "input")
+output_path <- file.path(project_path, "output")
+
+fn_E12 <- stringr::str_c("ipeds_",report_year,"_",fn_report_code,"_",report_time_str,".txt")
+
+# Now adjust the report year so data collection uses the correct year
+report_year <- report_year + report_year_data_adjustment
 
 #######################################
 #
@@ -103,21 +132,22 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
     mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) )
 
 reporting_terms <- terms %>%
-    filter( Term_Reporting_Year == report_year )
+    filter( Term_Reporting_Year == report_year + 1 )
 
 person <- getColleagueData( "PERSON" ) %>%
     filter( FIRST.NAME != "" ) %>%
-    select( Student_ID = ID, 
+    select( Campus_ID = ID, 
             First_Name = FIRST.NAME, 
             Last_Name = LAST.NAME, 
             Birth_Date = BIRTH.DATE,
             Gender = GENDER, 
-            ETHNIC, PER.ETHNICS, 
-            PER.RACES, 
-            X.ETHNICS.RACES, 
+            ETHNIC, 
             CITIZENSHIP, 
             RESIDENCE.COUNTRY, 
-            VISA.TYPE ) %>%
+            VISA.TYPE, 
+            PER.ETHNICS, 
+            PER.RACES, 
+            X.ETHNICS.RACES ) %>%
     collect() %>%
     mutate( CITIZENSHIP = if_else( CITIZENSHIP == "USA", "", CITIZENSHIP ) ) %>%
     mutate( IPEDS_Race = case_when(
@@ -151,11 +181,97 @@ person <- getColleagueData( "PERSON" ) %>%
         TRUE ~ if_else( Gender == "M", "FYRACE13", "FYRACE14" )
     )
     ) %>%
-    select( Student_ID, First_Name, Last_Name, Birth_Date, Gender, IPEDS_Race_Gender_Code )
+    select( Campus_ID, First_Name, Last_Name, Birth_Date, Gender, IPEDS_Race_Gender_Code )
 
-student_enrollment <- term_enrollment( report_year ) %>%
-    rename( Student_ID = ID ) %>%
-    left_join( person )
+student_credential_seekers_all <- credential_seekers( report_year, exclude_hs = TRUE ) %>%
+    rename( Campus_ID = ID )
+
+student_credential_seekers <- student_credential_seekers_all %>%
+    group_by( Campus_ID ) %>%
+    summarise( Credential_Seeker = max(Credential_Seeker), .groups = "drop" )
+
+ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
+    select( Campus_ID = ID, Term_ID, Term_Cohort, Cohort ) %>%
+    collect() %>%
+    inner_join( reporting_terms %>% select(Term_ID) )
+    
+student_term_enrollment <- term_enrollment( report_year ) %>%
+    rename( Campus_ID = ID ) 
+
+student_enrollment_all <- student_term_enrollment %>%
+    left_join( person, by="Campus_ID" ) %>%
+    left_join( student_credential_seekers, by="Campus_ID" ) %>%
+    mutate( Credential_Seeker = coalesce(Credential_Seeker,2),
+            de_level = case_when(
+                Distance_Courses=="All" ~ 100,
+                Distance_Courses=="At least 1" ~ 10,
+                TRUE ~ 1) ) %>%
+    left_join( ipeds_cohorts, by=c("Campus_ID","Term_ID") ) %>%
+    mutate( Term_Cohort_Abbrev = substring(coalesce(Term_Cohort,
+                                             str_c("    ",
+                                                   if_else(Credential_Seeker==1,"R","N"),
+                                                   substring(Status,1,1))),5,6) ) %>%
+    select( -c("Term_Cohort","Cohort") )
+
+se_first_term <- student_enrollment_all %>%
+    left_join( terms %>% select(Term_ID,Term_Index), by="Term_ID" ) %>%
+    group_by( Campus_ID ) %>%
+    summarise( Term_Index = min(Term_Index), .groups = "drop" )
+
+se_de <- student_enrollment_all %>%
+    group_by(Campus_ID) %>%
+    summarise( de_level = sum(de_level), .groups = "drop" ) %>%
+    mutate( mod_100 = mod(de_level,100),
+            mod_10  = mod(de_level,10) ) %>%
+    mutate( DE = case_when(
+                    mod_100==0 ~ "ENROLL_EXCLUSIVE",
+                    de_level<10 ~ "NOTENROLL",
+                    TRUE ~ "ENROLL_SOME") ) %>%
+    select( Campus_ID, DE )
+
+student_enrollment <- student_enrollment_all %>%
+    left_join( terms %>% select(Term_ID,Term_Index), by="Term_ID" ) %>%
+    inner_join( se_first_term, by=c("Campus_ID","Term_Index") ) %>%
+    select( -c(Distance_Courses,de_level) ) %>%
+    left_join( se_de, by="Campus_ID" )
+
+student_enrollment %>% group_by(Credential_Seeker, DE) %>% summarise(n = n(), .groups = "drop")
+student_enrollment %>% group_by(Term_Cohort_Abbrev) %>% summarise(n = n(), .groups = "drop")
+
+se_de_fall <- student_enrollment_all %>%
+    filter( Semester == "FA" ) %>%
+    group_by(Campus_ID, Credential_Seeker) %>%
+    summarise( de_level = sum(de_level), .groups = "drop" ) %>%
+    mutate( mod_100 = mod(de_level,100),
+            mod_10  = mod(de_level,10) ) %>%
+    mutate( DE = case_when(
+                    mod_100==0 ~ "ENROLL_EXCLUSIVE",
+                    de_level<10 ~ "NOTENROLL",
+                    TRUE ~ "ENROLL_SOME") ) %>%
+    select( Campus_ID, Credential_Seeker, DE )
+
+se_de_fall %>% group_by(Credential_Seeker, DE) %>% summarise(n = n(), .groups = "drop")
+
+se_ids <- student_enrollment %>%
+    inner_join( reporting_terms %>% select(Term_ID), by="Term_ID" ) %>%
+    select(Campus_ID) %>%
+    distinct()
+se_ids %>% summarise(n = n(), .groups = "drop")
+
+se_cohorts <- student_enrollment %>%
+    select(Campus_ID,Term_ID,Term_Cohort_Abbrev,Credential_Seeker,DE,IPEDS_Race_Gender_Code) %>%
+    mutate( LINE_a = case_when(
+                        Term_Cohort_Abbrev == "FT" ~ " 1",
+                        Term_Cohort_Abbrev == "TF" ~ " 2",
+                        Term_Cohort_Abbrev == "RF" ~ " 3",
+                        Term_Cohort_Abbrev == "NF" ~ " 7",
+                        Term_Cohort_Abbrev == "PT" ~ "15",
+                        Term_Cohort_Abbrev == "TP" ~ "16",
+                        Term_Cohort_Abbrev == "RP" ~ "17",
+                        Term_Cohort_Abbrev == "NP" ~ "21",
+                        TRUE ~ "00" ),
+            LINE_c = if_else(Term_Cohort_Abbrev %in% c("FT","PT","TF","TP","RF","RP"),"1","2") )
+se_cohorts %>% group_by(Credential_Seeker, LINE_c, DE) %>% summarise(n = n(), .groups = "drop")
 
 race_gender_cols <- c( FYRACE01=NA_character_, FYRACE02=NA_character_,
                        FYRACE25=NA_character_, FYRACE26=NA_character_,
@@ -167,39 +283,69 @@ race_gender_cols <- c( FYRACE01=NA_character_, FYRACE02=NA_character_,
                        FYRACE37=NA_character_, FYRACE38=NA_character_,
                        FYRACE13=NA_character_, FYRACE14=NA_character_ )
 e12_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
-                 SLEVEL=NA_character_, Filler_1=NA_character_, 
+                 LINE=NA_character_, Filler_1=NA_character_, 
                  race_gender_cols )
 e12_b_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
-                 Filler_1=NA_character_, CREDHRSU=NA_character_, CONTHRS=NA_character_ )
+                 Filler_1=NA_character_, CREDHRSU=NA_character_, CONTHRS=NA_character_,
+                 Filler_2=NA_character_ )
+e12_c_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
+                 LINE=NA_character_, 
+                 ENROLL_EXCLUSIVE=NA_character_, ENROLL_SOME=NA_character_ )
 
-ipeds_e12_a <- student_enrollment %>%
-    select( Student_ID, IPEDS_Race_Gender_Code ) %>%
+
+###
+### Changed SLEVEL to LINE in A columns
+###
+### Added Part C
+### 
+
+
+ipeds_e12_a <- se_cohorts %>%
+    rename( LINE = LINE_a ) %>%
+    select( Campus_ID, LINE, IPEDS_Race_Gender_Code ) %>%
     distinct() %>%
-    group_by( IPEDS_Race_Gender_Code ) %>%
+    group_by( LINE, IPEDS_Race_Gender_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
     spread( IPEDS_Race_Gender_Code, Students, fill="000000" ) %>%
     ungroup() %>%
     add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
     mutate_at(.vars=names(race_gender_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = '198668',
-            SURVSECT = UpperCase(fn_report_code),
+            SURVSECT = toupper(fn_report_code),
             PART = 'A',
-            SLEVEL = '1',
-            Filler_1 = '        ' ) %>%
-    select_( .dots=names(e12_a_cols) )
+            Filler_1 = strrep(' ',7) ) %>%
+    select( all_of(names(e12_a_cols)) )
 
-ipeds_e12_b <- student_enrollment %>%
+ipeds_e12_b <- student_enrollment_all %>%
     distinct() %>%
-    summarise( CREDHRSU = sprintf("%08d", sum(Credits) ) ) %>%
+    summarise( CREDHRSU = sprintf("%08d", sum(Credits) ), .groups = "drop" ) %>%
     mutate( UNITID = '198668',
-            SURVSECT = UpperCase(fn_report_code),
+            SURVSECT = toupper(fn_report_code),
             PART = 'B',
             CONTHRS = '        ',
-            Filler_1 = '         ') %>%
-    select_( .dots=names(e12_b_cols) )
+            Filler_1 = '         ',
+            Filler_2 = '        ' ) %>%
+    select( all_of(names(e12_b_cols)) )
+
+ipeds_e12_c <- se_cohorts %>%
+    rename( LINE = LINE_c ) %>%
+    select( Campus_ID, LINE, DE ) %>%
+    distinct() %>%
+    group_by( LINE, DE ) %>%
+    mutate( student = 1 ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
+    spread( DE, Students, fill="000000" ) %>%
+    ungroup() %>%
+    add_column( !!!c("ENROLL_EXCLUSIVE", "ENROLL_SOME") ) %>%
+    mutate_at(.vars=c("ENROLL_EXCLUSIVE", "ENROLL_SOME"), function(x) {return( coalesce(x,"000000") )} ) %>%
+    mutate( UNITID = '198668',
+            SURVSECT = toupper(fn_report_code),
+            PART = 'C' ) %>%
+    select( all_of(names(e12_c_cols)) )
 
 if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_e12_a), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
     write.table( data.frame(ipeds_e12_b), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_e12_c), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
 }

@@ -1,37 +1,42 @@
-#OVERRIDE_REPORT_YEAR <- NA # Set to NA for current academic year's fall term
-OVERRIDE_REPORT_YEAR <- 2018 # Set to NA for current academic year's fall term
+###
+### Define GLOBAL USER variables
+###
 
-WRITE_OUTPUT <- TRUE #WRITE_OUTPUT <- FALSE
-CLEANUP <- FALSE #TRUE
-TEST <- TRUE #FALSE
+fn_report_code <- "ef2"
+report_year_data_adjustment <- 0
+
+# OVERRIDE_REPORT_YEAR <- 2019 # Set to NA for current academic year's fall term
+
+WRITE_OUTPUT <- TRUE
+CLEANUP <- FALSE
+TEST <- FALSE
 
 # TODO: Faculty/Student Ratio
 
 ir_root <- "L:/IERG"
 
-project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
+###
+### End GLOBAL USER variables
+###
 
 nsc_path <- file.path(ir_root, "Data", "NSC")
 ipeds_path <- file.path(ir_root, "Data", "IPEDS")
 
-package_date <- "2019-04-01" # date of the CRAN snapshot that the checkpoint package uses
+package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint package uses
 
 # if checkpoint is not yet installed, install it (for people using this
 # system for the first time)
-if (!require(checkpoint)) {
-    install.packages("checkpoint")
-    require(checkpoint)
-}
+#if (!require(checkpoint)) {
+#    install.packages("checkpoint")
+#    require(checkpoint)
+#}
 
 # install packages for the specified CRAN snapshot date
-checkpoint(snapshotDate = package_date,
-           checkpointLocation = ir_root,
-           project = project_path,
-           verbose = T,
-           scanForPackages = T,
-           use.knitr = F)
+#checkpoint(snapshotDate = package_date,
+#           checkpointLocation = ir_root,
+#           verbose = T,
+#           scanForPackages = T,
+#           use.knitr = F)
 
 require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
 require(magrittr) # pipes
@@ -40,51 +45,43 @@ require(lubridate)
 require(dbplyr)
 require(odbc)
 require(yaml)
-require(optparse)
 
 # Enter local packages needed for this particular script 
 if (!require(haywoodcc)) {
-    #library(devtools)
     devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
     require(haywoodcc)
 }
 
 sessionInfo()
 
-option_list = list(
-    make_option(c("-ov", "--report_year"), type="numeric", default=OVERRIDE_REPORT_YEAR, 
-                help="dataset file name", metavar="numeric"),
-    make_option(c("-o", "--write_output"), action="store_true", type="logical", default=WRITE_OUTPUT, 
-                help="write the output file [default= %default]", metavar="logical"),
-    make_option(c("-c", "--cleanup"), action="store_true", type="logical", default=CLEANUP, 
-                help="cleanup the work files in progress [default= %default]", metavar="logical"),
-    make_option(c("-t", "--test"), action="store_true", type="logical", default=TEST, 
-                help="turn on test code [default= %default]", metavar="logical")
-); 
-
-opt_parser = OptionParser(option_list=option_list);
-opt = parse_args(opt_parser);
-
-
 # Now, load the campus configuration
 cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-scripts_path <- cfg$R$scripts_path
-if (str_sub(scripts_path, -1) == "/") {
-    scripts_path = str_sub(scripts_path, 1, -2 )
+
+### 
+### Define common report variables
+###
+if (!exists("OVERRIDE_REPORT_YEAR")) {
+    OVERRIDE_REPORT_YEAR <- NA_integer_
 }
 
-report_year <- as.numeric(format(Sys.time(), "%Y"))
+if (!exists("WRITE_OUTPUT")) {
+    WRITE_OUTPUT <- NA_integer_
+}
 
-# Set report_month to actual month to allow adjustment of report_year based on month
-# Otherwise, set to -1
-report_month <- as.numeric(format(Sys.time(), "%m"))
+current_year <- as.numeric(format(Sys.time(), "%Y"))
+current_month <- as.numeric(format(Sys.time(), "%m"))
+
+report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
 
 # Fix report year to be the year of the Fall term
-report_year <- report_year - if_else(report_month < 7, 1, 0)
+report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
+report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
 
-report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year)
+# Fix report year to be the correct year for the data (or the OVERRIDE value)
+report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
+                       OVERRIDE_REPORT_YEAR,
+                       report_year - report_year_data_adjustment )
 
-# We get one additional year if we need change from last year
 report_year_data_start <- report_year
 #report_year_data_end <- report_year - (dplyr::if_else( include_current_ay, 0, 1 ))
 
@@ -100,12 +97,11 @@ report_term_retention_PTFT <- str_c(report_year-1, "PT")
 
 report_year_date <- ymd( str_c(report_year, 10, 15) )
 
-fn_report_code <- "ef2"
+project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+input_path <- file.path(project_path, "input")
+output_path <- file.path(project_path, "output")
 
-fn_EF2 <- str_c("ipeds_",report_year,"_",fn_report_code,".txt")
-#fn_EF2A <- str_c("ipeds_",report_year,"_",report_code, "a.txt")
-#fn_EF2E <- str_c("ipeds_",report_year,"_ef2e.txt")
-
+fn_EF2 <- stringr::str_c("ipeds_",report_year + report_year_data_adjustment,"_",fn_report_code,"_",report_time_str,".txt")
 
 #######################################
 #
@@ -124,10 +120,10 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
             Term_Start_Date,
             Term_Census_Date,
             Term_End_Date,
-            Term_Reporting_Year = Reporting_Year,
+            Term_Reporting_Year = Reporting_Year_FSS,
             Academic_Year ) %>%
     collect() %>%
-    mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) )
+    mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) - 1 )
 
 reporting_terms <- terms %>%
     filter( Term_Reporting_Year == report_year,
@@ -140,13 +136,13 @@ reporting_terms <- terms %>%
 ###
 #ipeds_cohorts <- read_csv( file.path(ipeds_path,"ipeds_cohorts.csv"), col_types = cols(.default=col_character()) ) %>%
 ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
-    select( ID, Term_ID, Cohort, Term_Cohort ) %>%
+    select( Campus_ID, Term_ID, Cohort, Term_Cohort ) %>%
     collect() %>%
     inner_join( terms %>% select(Term_ID,Cohort_Year=Term_Reporting_Year,Cohort_Start_Date=Term_Start_Date) ) %>%
     filter( Cohort_Year %in% c(report_year, report_year - 1) )
 
 ipeds_cohorts_ids <- ipeds_cohorts %>%
-    select(ID) %>%
+    select(Campus_ID) %>%
     distinct()
 
 ipeds_cohorts_ly_ft <- ipeds_cohorts %>%
@@ -158,19 +154,20 @@ ipeds_cohorts_ly_ft <- ipeds_cohorts %>%
 #
 person <- getColleagueData( "PERSON" ) %>%
     filter( FIRST.NAME != "" ) %>%
-    select( ID, 
+    select( Campus_ID, 
             First_Name = FIRST.NAME, 
             Last_Name = LAST.NAME, 
             Birth_Date = BIRTH.DATE,
             State = STATE,
             Residence_State = RESIDENCE.STATE,
             Gender = GENDER, 
-            ETHNIC, PER.ETHNICS, 
-            PER.RACES, 
-            X.ETHNICS.RACES, 
+            ETHNIC, 
             CITIZENSHIP, 
             Country = RESIDENCE.COUNTRY, 
-            VISA.TYPE ) %>%
+            VISA.TYPE,
+            PER.ETHNICS, 
+            PER.RACES, 
+            X.ETHNICS.RACES ) %>%
     collect() %>%
     mutate( CITIZENSHIP = if_else( CITIZENSHIP == "USA", "", CITIZENSHIP ),
             Age = floor(interval(start = Birth_Date, end = report_year_date) /
@@ -237,14 +234,15 @@ person <- getColleagueData( "PERSON" ) %>%
 
                 TRUE ~ "57"
             )) %>%
-    select( ID, First_Name, Last_Name, Age, Age_Category, State, Country, State_Code, Gender, IPEDS_Race, IPEDS_Race_Code )
+    select( Campus_ID, First_Name, Last_Name, Age, Age_Category, State, Country, State_Code, Gender, IPEDS_Race, IPEDS_Race_Code )
 
 student_enrollment_all_terms <- term_enrollment()
 
 #
 # Get the fall enrolled students
 #
-fall_students <- fall_enrollment( report_year )
+fall_students <- fall_enrollment( report_year ) %>%
+    filter( Enrollment_Status != "Withdrawn" )
 
 #
 # Get the fall enrolled students
@@ -258,7 +256,7 @@ institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     # Keep HS graduation records
     filter( INSTA.INST.TYPE == "HS",
             INSTA.GRAD.TYPE == "Y" ) %>%
-    select( ID=INSTA.PERSON.ID,
+    select( Campus_ID=INSTA.PERSON.ID,
             Institution_Name=X.INSTA.INSTITUTION,
             End_Dates=INSTA.END.DATES
     ) %>%
@@ -273,18 +271,18 @@ institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     select( -End_Dates ) %>%
     filter( !is.na(End_Date) ) %>%
     mutate( End_Date = ymd(End_Date) ) %>%
-    group_by( ID ) %>% 
+    group_by( Campus_ID ) %>% 
     summarize( HS_Grad_Date = min(End_Date) ) %>%
     ungroup() %>%
     distinct()
 
 non_credential_seekers_ft <- fall_students %>%
     anti_join( credential_students ) %>%
-    select( ID ) %>%
+    select( Campus_ID ) %>%
     left_join( student_enrollment_all_terms ) %>%
-    select( ID, Term_ID ) %>%
+    select( Campus_ID, Term_ID ) %>%
     left_join( terms %>% select(Term_ID,Term_Start_Date) ) %>%
-    group_by( ID ) %>%
+    group_by( Campus_ID ) %>%
     summarise( Term_Start_Date = min(Term_Start_Date) ) %>%
     mutate( First_Term = 1 )
 
@@ -293,7 +291,7 @@ non_credential_seekers <- fall_students %>%
     left_join( terms %>% select(Term_ID,Term_Start_Date) ) %>%
     left_join( non_credential_seekers_ft ) %>%
     mutate( Non_Degree_First_Term = coalesce(First_Term,0) ) %>%
-    select( ID, Non_Degree_First_Term )
+    select( Campus_ID, Non_Degree_First_Term )
 
 fall_students_with_credentials <- fall_students %>%
     left_join( ipeds_cohorts ) %>%
@@ -310,7 +308,7 @@ fall_students_with_credentials <- fall_students %>%
                 Cohort %in% c(report_term_FTTR, report_term_PTTR) ~ "Transfer",
                 TRUE ~ "Unknown"
             ),
-            HS_Grad_Diff = coalesce(Cohort_Start_Date - HS_Grad_Date,0) ) %>%
+            HS_Grad_Diff = coalesce(as.integer(Cohort_Start_Date - HS_Grad_Date),0) ) %>%
     mutate( Student_Level_A = case_when(
                 (Status == "FT") & (Student_Level_Cohort == "First-time") & (Credential_Seeker == 1) ~ "01",
                 (Status == "FT") & (Student_Level_Cohort == "Transfer") & (Credential_Seeker == 1) ~ "02",
@@ -345,16 +343,17 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     filter( ACAD.INSTITUTIONS.ID == "0019844",
             # ACAD.END.DATE > report_term_start_date || ACAD.CAST.DATE > report_term_start_date,
             !(ACAD.ACAD.PROGRAM %in% c("AHS", "=GED", "HSEGED")) ) %>%
-    select( ID = ACAD.PERSON.ID,
+    select( Campus_ID = ACAD.PERSON.ID,
             Term_ID = ACAD.TERM, 
             Program = ACAD.ACAD.PROGRAM,
             End_Date = ACAD.END.DATE,
             Cast_Date = ACAD.CAST.DATE
     ) %>%
     collect() %>%
+    mutate( Cast_Date = as.Date(Cast_Date) ) %>%
     
     # Reduce the credentials to those in the retention cohort
-    inner_join( retention_students %>% select(ID,Cohort_Start_Date) ) %>%
+    inner_join( retention_students %>% select(Campus_ID,Cohort_Start_Date) ) %>%
     
     # Get term date information to compare to credential date
     left_join( terms %>% select(Term_ID, Term_End_Date ) ) %>%
@@ -363,7 +362,7 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     
     # Keep any credentials earned after the cohort date
     filter( Term_End_Date >= Cohort_Start_Date ) %>%
-    select( ID, Graduated ) %>%
+    select( Campus_ID, Graduated ) %>%
     distinct()
 
 retention <- retention_students %>%
@@ -378,7 +377,7 @@ retention <- retention_students %>%
     mutate( Graduated = coalesce(Graduated,0) ) %>%
     
     # Now, bring in credits from current fall term
-    left_join( fall_students %>% select(ID,NY_Credits=Credits) ) %>%
+    left_join( fall_students %>% select(Campus_ID,NY_Credits=Credits) ) %>%
     mutate( NY_Credits = coalesce(NY_Credits,0) ) %>%
         
     # Calculate retention
@@ -431,7 +430,7 @@ ipeds_ef2_a <- fall_students_with_credentials %>%
             CIPCODE = "99.0000" ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_a_cols) ) %>%
+    select( all_of(names(ef2_a_cols)) ) %>%
     
     # Sort the final data by the Student Level to make it easier to debug
     arrange( as.integer(LINE) )
@@ -480,7 +479,7 @@ ipeds_ef2_g_dc <- fall_students_with_credentials %>%
     rename( LINE = Student_Level_G ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_g_dc_cols) )
+    select( all_of(names(ef2_g_dc_cols)) )
     
 # Then get the students who are enrolled exclusively online    
 ipeds_ef2_g_dce <- fall_students_with_credentials %>%
@@ -508,7 +507,7 @@ ipeds_ef2_g_dce <- fall_students_with_credentials %>%
     rename( LINE = Student_Level_G ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_g_dce_cols) )
+    select( all_of(names(ef2_g_dce_cols)) )
 
 # Now put the final table together
 ipeds_ef2_g <- ipeds_ef2_g_dc %>% 
@@ -522,7 +521,7 @@ ipeds_ef2_g <- ipeds_ef2_g_dc %>%
             TOTAL = '      ' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_g_cols) ) %>%
+    select( all_of(names(ef2_g_cols)) ) %>%
     
     # Sort the final data by the Student Level to make it easier to debug
     arrange( as.integer(LINE) )
@@ -574,7 +573,7 @@ ipeds_ef2_b <- fall_students_with_credentials %>%
             Filler = '      ' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_b_cols) ) %>%
+    select( all_of(names(ef2_b_cols)) ) %>%
     
     # Sort the final data by the Student Level to make it easier to debug
     arrange( as.integer(LINE) )
@@ -614,7 +613,7 @@ ipeds_ef2_c <- fall_students_with_credentials %>%
             Filler = '       ' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_c_cols) ) %>%
+    select( all_of(names(ef2_c_cols)) ) %>%
     
     # Sort the final data by the Student Level to make it easier to debug
     arrange( as.integer(LINE) )
@@ -646,7 +645,7 @@ ipeds_ef2_d <- fall_students_with_credentials %>%
             Filler = '         ' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_d_cols) ) 
+    select( all_of(names(ef2_d_cols)) ) 
 
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
@@ -696,7 +695,7 @@ ipeds_ef2_e <- retention %>%
     #mutate_at(.vars=names(ef2_e_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select_( .dots=names(ef2_e_cols) ) 
+    select( all_of(names(ef2_e_cols)) ) 
 
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
@@ -708,7 +707,12 @@ if (CLEANUP) {
 #
 ef2_f_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_, ST_STAFF_RATIO=NA_character_ )
 
-if (report_year==2018) {
+if (report_year==2019) {
+    ipeds_ef2_f <- data.frame( UNITID = '198668',
+                               SURVSECT = 'EF2',
+                               PART = 'F',
+                               ST_STAFF_RATIO="000000" )
+} else if (report_year==2018) {
     ipeds_ef2_f <- data.frame( UNITID = '198668',
                                SURVSECT = 'EF2',
                                PART = 'F',
