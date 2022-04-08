@@ -3,7 +3,7 @@ get_terms <- function( report_years = NA_integer_, report_semesters = NA_charact
     if (is.na(ay_type)) {
         ay_type <- "FSS"
     } else {
-        if !(ay_type %in% ("FSS","SFS")) {
+        if (!(ay_type %in% c("FSS","SFS"))) {
             return( NA )
         }
     }
@@ -39,7 +39,7 @@ get_terms <- function( report_years = NA_integer_, report_semesters = NA_charact
         terms <- readr::read_csv( terms_file, 
                                   col_types = cols( TERMS.ID = col_character(),
                                                     TERM.START.DATE = col_date(format = ""),
-                                                    TERM.CENSUS.DATE = col_date(format = "")
+                                                    TERM.CENSUS.DATE = col_date(format = ""),
                                                     TERM.END.DATE = col_date(format = ""),
                                                     TERM.REPORTING.YEAR = col_integer(),
                                                     .default = col_character() ) ) %>%
