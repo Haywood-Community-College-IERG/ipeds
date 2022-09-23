@@ -1,76 +1,35 @@
-###
-### Define GLOBAL USER variables
-###
+# Original source code can be found on GitHub at the link below:
+# https://github.com/Haywood-Community-College-IERG/2022-04-07-NCAIR-Utilizing-R-for-IPEDS-Reporting
 
+### Define GLOBAL USER variables
 fn_report_code <- "e12"
 report_year_data_adjustment <- -1
 
-#OVERRIDE_REPORT_YEAR <- 2017 #  Comment for current academic year's fall term
-
+# Comment for current academic year's fall term
+#OVERRIDE_REPORT_YEAR <- 2017 
 WRITE_OUTPUT <- TRUE # Comment line for default: FALSE
 CLEANUP <- FALSE # Comment line for default: TRUE
 TEST <- TRUE # Comment line for default: FALSE
-
-# TODO: Faculty/Student Ratio
-
-ir_root <- "L:/IERG"
 
 project_path <- file.path(".")
 input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
+## Define Frontmatter - Part 2
 
-package_date <- "2019-04-01" # date of the CRAN snapshot that the checkpoint package uses
+### Load Packages
+library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
+library(magrittr) # pipes
+library(stringr) # string manipulation
+library(lubridate)
+# Load local package
+library(haywoodcc) # renv::install("Haywood-Community-College-IERG/haywoodcc")
 
-# # if checkpoint is not yet installed, install it (for people using this
-# # system for the first time)
-# if (!require(checkpoint)) {
-#     install.packages("checkpoint")
-#     require(checkpoint)
-# }
-# 
-# # install packages for the specified CRAN snapshot date
-# checkpoint(snapshotDate = package_date,
-#            checkpointLocation = ir_root,
-#            project = project_path,
-#            verbose = T,
-#            scanForPackages = T,
-#            use.knitr = F)
-
-require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-require(magrittr) # pipes
-require(stringr) # string manipulation
-require(lubridate)
-require(dbplyr)
-require(odbc)
-require(yaml)
-require(optparse)
-
-# Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    #library(devtools)
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
-
-sessionInfo()
-
-# Now, load the campus configuration
-cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-scripts_path <- cfg$R$scripts_path
-if (str_sub(scripts_path, -1) == "/") {
-    scripts_path = str_sub(scripts_path, 1, -2 )
-}
-
-### 
 ### Define common report variables
-###
 if (!exists("OVERRIDE_REPORT_YEAR")) {
     OVERRIDE_REPORT_YEAR <- NA_integer_
 }
-
+# Repeat for WRITE_OUTPUT, CLEANUP, TEST
 if (!exists("WRITE_OUTPUT")) {
     WRITE_OUTPUT <- NA_integer_
 }
@@ -89,7 +48,7 @@ current_month <- as.numeric(format(Sys.time(), "%m"))
 
 report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
 
-report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
+report_year <- as.integer(current_year - ifelse(current_month < 7, 1, 0))
 report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year)
 report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
 
@@ -116,6 +75,10 @@ non_summer_term_id <- str_c(report_year, "SU")
 #
 #######################################
 
+### Uncomment this to use files in the data folder
+#setCfg("data_source","from_file_path","data")
+cfg <- getCfg()
+
 #
 # Get terms data from DB
 #
@@ -132,11 +95,14 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
     collect() %>%
     mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) )
 
+# Additionally:
+# - Get data from PERSON and ipeds_cohorts from files/DB
+# - Get data via haywoodcc package for credential_seekers and term_enrollment
+
 reporting_terms <- terms %>%
     filter( Term_Reporting_Year == report_year + 1 )
 
 person <- getColleagueData( "PERSON" ) %>%
-    filter( FIRST.NAME != "" ) %>%
     select( Campus_ID = ID, 
             First_Name = FIRST.NAME, 
             Last_Name = LAST.NAME, 
@@ -194,11 +160,19 @@ student_credential_seekers <- student_credential_seekers_all %>%
 ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
     select( Campus_ID = ID, Term_ID, Term_Cohort, Cohort ) %>%
     collect() %>%
-    inner_join( reporting_terms %>% select(Term_ID) )
+    inner_join( reporting_terms %>% select(Term_ID), by="Term_ID" )
     
 student_term_enrollment <- term_enrollment( report_year ) %>%
     rename( Campus_ID = ID ) 
 
+# Data retrieved
+# 
+# - Demographics
+# - Data frame of non-high school credential seekers
+# - Data frame of enrollment for the `r report_year` terms
+
+# As an example, create a df with distance load identified
+#    ...this is used later on to determine if enrolled exclusively online
 student_enrollment_all <- student_term_enrollment %>%
     left_join( person, by="Campus_ID" ) %>%
     left_join( student_credential_seekers, by="Campus_ID" ) %>%
@@ -283,6 +257,7 @@ se_cohorts <- student_enrollment %>%
             LINE_c = if_else(Term_Cohort_Abbrev %in% c("FT","PT","TF","TP","RF","RP"),"1","2") )
 se_cohorts %>% group_by(Credential_Seeker, LINE_c, DE) %>% summarise(n = n(), .groups = "drop")
 
+## Create IPEDS data frames
 race_gender_cols <- c( FYRACE01=NA_character_, FYRACE02=NA_character_,
                        FYRACE25=NA_character_, FYRACE26=NA_character_,
                        FYRACE27=NA_character_, FYRACE28=NA_character_,
@@ -292,6 +267,8 @@ race_gender_cols <- c( FYRACE01=NA_character_, FYRACE02=NA_character_,
                        FYRACE35=NA_character_, FYRACE36=NA_character_,
                        FYRACE37=NA_character_, FYRACE38=NA_character_,
                        FYRACE13=NA_character_, FYRACE14=NA_character_ )
+
+# Also create e12_*_cols for the parts A, B, and C
 e12_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  LINE=NA_character_, Filler_1=NA_character_, 
                  race_gender_cols )
@@ -302,35 +279,66 @@ e12_c_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character
                  LINE=NA_character_, 
                  ENROLL_EXCLUSIVE=NA_character_, ENROLL_SOME=NA_character_ )
 
-
-###
-### Changed SLEVEL to LINE in A columns
-###
-### Added Part C
-### 
-
+# This creates Part A.
+# The first line looks like this in the output:
+# 198668E12A 3       000000000000000001000004000001000002000000000001...
+# 
+# > str(se_chorts)
+# tibble [280 x 8] (S3: tbl_df/tbl/data.frame)
+# $ Campus_ID             : num [1:280] 5000331 5000690 5001380 5001681 5001697 ...
+# $ Term_ID               : chr [1:280] "2021SP" "2021SP" "2021SP" "2021SP" ...
+# $ Term_Cohort_Abbrev    : chr [1:280] "RP" "RF" "NP" "RP" ...
+# $ Credential_Seeker     : num [1:280] 1 1 2 1 2 1 1 1 1 2 ...
+# $ DE                    : chr [1:280] "ENROLL_EXCLUSIVE" "ENROLL_SOME" "ENROLL_EXCLUSIVE" "ENROLL_EXCLUSIVE" ...
+# $ IPEDS_Race_Gender_Code: chr [1:280] "FYRACE36" "FYRACE36" "FYRACE36" "FYRACE35" ...
+# $ LINE_a                : chr [1:280] "17" " 3" "21" "17" ...
+# $ LINE_c                : chr [1:280] "1" "1" "2" "1" ...
 
 ipeds_e12_a <- se_cohorts %>%
     rename( LINE = LINE_a ) %>%
     select( Campus_ID, LINE, IPEDS_Race_Gender_Code ) %>%
     distinct() %>%
-    group_by( LINE, IPEDS_Race_Gender_Code ) %>%
     mutate( student = 1 ) %>%
+    ### <b>
+    group_by( LINE, IPEDS_Race_Gender_Code ) %>%
     summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
     spread( IPEDS_Race_Gender_Code, Students, fill="000000" ) %>%
     ungroup() %>%
     add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
-    mutate_at(.vars=names(race_gender_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
-    mutate( UNITID = '198668',
+    ### </b>
+    mutate_at(.vars=names(race_gender_cols), 
+              function(x) {return( coalesce(x,"000000") )} ) %>%
+    mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
             PART = 'A',
             Filler_1 = strrep(' ',7) ) %>%
     select( all_of(names(e12_a_cols)) )
 
+# Similar steps are used to create Parts B and C
+
+# > str(student_enrollment_all)
+# tibble [338 x 16] (S3: tbl_df/tbl/data.frame)
+# $ Campus_ID             : num [1:338] 5000331 5000690 5001380 5001681 5001697 ...
+# $ Term_ID               : chr [1:338] "2021SP" "2021SP" "2021SP" "2021SU" ...
+# $ Term_Reporting_Year   : num [1:338] 2020 2020 2020 2020 2020 2020 2020 2020 2020 2020 ...
+# $ Semester              : chr [1:338] "SP" "SP" "SP" "SU" ...
+# $ Credits               : num [1:338] 3 14 4 3 8 7 12 20 13 9 ...
+# $ Status                : chr [1:338] "PT" "FT" "PT" "PT" ...
+# $ Distance_Courses      : chr [1:338] "All" "At least 1" "All" "All" ...
+# $ Enrollment_Status     : chr [1:338] "Enrolled" "Enrolled" "Enrolled" "Enrolled" ...
+# $ First_Name            : logi [1:338] NA NA NA NA NA NA ...
+# $ Last_Name             : logi [1:338] NA NA NA NA NA NA ...
+# $ Birth_Date            : Date[1:338], format: "1981-02-21" "1987-08-26" "1990-01-31" "1990-01-31" ...
+# $ Gender                : chr [1:338] "F" "F" "F" "F" ...
+# $ IPEDS_Race_Gender_Code: chr [1:338] "FYRACE36" "FYRACE36" "FYRACE36" "FYRACE36" ...
+# $ Credential_Seeker     : num [1:338] 1 1 2 2 1 2 1 1 1 1 ...
+# $ de_level              : num [1:338] 100 10 100 100 100 100 10 10 100 100 ...
+# $ Term_Cohort_Abbrev    : chr [1:338] "RP" "RF" "NP" "HP" ...
+
 ipeds_e12_b <- student_enrollment_all %>%
     distinct() %>%
     summarise( CREDHRSU = sprintf("%08d", sum(Credits) ), .groups = "drop" ) %>%
-    mutate( UNITID = '198668',
+    mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
             PART = 'B',
             CONTHRS = '        ',
@@ -349,13 +357,21 @@ ipeds_e12_c <- se_cohorts %>%
     ungroup() %>%
     add_column( !!!c("ENROLL_EXCLUSIVE", "ENROLL_SOME") ) %>%
     mutate_at(.vars=c("ENROLL_EXCLUSIVE", "ENROLL_SOME"), function(x) {return( coalesce(x,"000000") )} ) %>%
-    mutate( UNITID = '198668',
+    mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
             PART = 'C' ) %>%
     select( all_of(names(e12_c_cols)) )
 
+## Write out the data
+
 if (WRITE_OUTPUT) {
-    write.table( data.frame(ipeds_e12_a), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
-    write.table( data.frame(ipeds_e12_b), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_e12_c), file.path(output_path, fn_E12), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_e12_a), 
+                 file.path(output_path, fn_E12), 
+                 sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
+    write.table( data.frame(ipeds_e12_b), 
+                 file.path(output_path, fn_E12), 
+                 sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_e12_c), 
+                 file.path(output_path, fn_E12), 
+                 sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
 }

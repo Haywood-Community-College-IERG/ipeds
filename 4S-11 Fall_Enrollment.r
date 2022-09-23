@@ -26,9 +26,9 @@ package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint pac
 
 # if checkpoint is not yet installed, install it (for people using this
 # system for the first time)
-#if (!require(checkpoint)) {
+#if (!library(checkpoint)) {
 #    install.packages("checkpoint")
-#    require(checkpoint)
+#    library(checkpoint)
 #}
 
 # install packages for the specified CRAN snapshot date
@@ -38,19 +38,16 @@ package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint pac
 #           scanForPackages = T,
 #           use.knitr = F)
 
-require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-require(magrittr) # pipes
-require(stringr) # string manipulation
-require(lubridate)
-require(dbplyr)
-require(odbc)
-require(yaml)
+library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
+library(magrittr) # pipes
+library(stringr) # string manipulation
+library(lubridate)
+library(dbplyr)
+library(odbc)
+library(yaml)
 
 # Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
+library(haywoodcc)
 
 sessionInfo()
 
@@ -97,7 +94,8 @@ report_term_retention_PTFT <- str_c(report_year-1, "PT")
 
 report_year_date <- ymd( str_c(report_year, 10, 15) )
 
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+#project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
+project_path <- file.path(".")
 input_path <- file.path(project_path, "input")
 output_path <- file.path(project_path, "output")
 
@@ -136,7 +134,7 @@ reporting_terms <- terms %>%
 ###
 #ipeds_cohorts <- read_csv( file.path(ipeds_path,"ipeds_cohorts.csv"), col_types = cols(.default=col_character()) ) %>%
 ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
-    select( Campus_ID, Term_ID, Cohort, Term_Cohort ) %>%
+    select( Campus_ID = ID, Term_ID, Cohort, Term_Cohort ) %>%
     collect() %>%
     inner_join( terms %>% select(Term_ID,Cohort_Year=Term_Reporting_Year,Cohort_Start_Date=Term_Start_Date) ) %>%
     filter( Cohort_Year %in% c(report_year, report_year - 1) )
@@ -154,7 +152,7 @@ ipeds_cohorts_ly_ft <- ipeds_cohorts %>%
 #
 person <- getColleagueData( "PERSON" ) %>%
     filter( FIRST.NAME != "" ) %>%
-    select( Campus_ID, 
+    select( Campus_ID = ID, 
             First_Name = FIRST.NAME, 
             Last_Name = LAST.NAME, 
             Birth_Date = BIRTH.DATE,
@@ -236,20 +234,23 @@ person <- getColleagueData( "PERSON" ) %>%
             )) %>%
     select( Campus_ID, First_Name, Last_Name, Age, Age_Category, State, Country, State_Code, Gender, IPEDS_Race, IPEDS_Race_Code )
 
-student_enrollment_all_terms <- term_enrollment()
+student_enrollment_all_terms <- term_enrollment() %>%
+    rename( Campus_ID = ID )
 
 #
 # Get the fall enrolled students
 #
 fall_students <- fall_enrollment( report_year ) %>%
+    rename( Campus_ID = ID ) %>%
     filter( Enrollment_Status != "Withdrawn" )
 
 #
 # Get the fall enrolled students
 # HS students are not considered credential seekers by IPEDS
 #
-credential_students <- fall_credential_seekers( report_year, exclude_hs = TRUE )
-
+credential_students <- fall_credential_seekers( report_year, exclude_hs = TRUE ) %>%
+    rename( Campus_ID = ID )
+    
 # institutions_attend <- high_school_graduation_dates()
 institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     
@@ -336,6 +337,7 @@ fall_students_with_credentials <- fall_students %>%
     #         IPEDS_Race_Code = coalesce(IPEDS_Race_Code,EFRACE13) )
 
 retention_students <- fall_enrollment( report_year-1 ) %>%
+    rename( Campus_ID = ID ) %>%
     inner_join( ipeds_cohorts_ly_ft )
 
 
