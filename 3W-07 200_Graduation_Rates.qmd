@@ -14,16 +14,21 @@ library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
 library(magrittr) # pipes
 library(stringr) # string manipulation
 library(dbplyr)
-#library(odbc)
-#library(yaml)
+library(odbc)
+library(yaml)
 library(lubridate)
-library(ccdwr)
-library(haywoodcc)
+
+# Enter local packages needed for this particular script 
+if (!require(haywoodcc)) {
+    #library(devtools)
+    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
+    require(haywoodcc)
+}
 
 sessionInfo()
 
 # Now, load the campus configuration
-#cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
+cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
 
 if (!exists("OVERRIDE_REPORT_YEAR")) {
     OVERRIDE_REPORT_YEAR <- NA_integer_

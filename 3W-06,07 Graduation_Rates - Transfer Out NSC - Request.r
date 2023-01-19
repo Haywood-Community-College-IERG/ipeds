@@ -1,42 +1,22 @@
-#OVERRIDE_REPORT_YEAR <- 2018 # Set to NA to use current year
+# To override the current report year, set report_year here
+params <- list( current_datetime="",
+                report_year="",
+                report_data_term="",
+                write_output=TRUE,
+                test=FALSE,
+                cleanup=FALSE,
+                report_code=""
+              )
 
-WRITE_OUTPUT <- TRUE
+report_year_data_adjustment <- 0
 
-ir_root <- "L:/IERG"
+source('_packages.r')
+source('_setup.r')
 
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
-
-package_date <- "2020-01-01" # date of the CRAN snapshot that the checkpoint
-                             # package uses
-
-library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-library(magrittr) # pipes
-library(stringr) # string manipulation
-library(dbplyr)
-library(odbc)
-library(yaml)
-library(lubridate)
-
-# Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    #library(devtools)
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
+library(nscrequest)
 
 sessionInfo()
 
-# Now, load the campus configuration
-cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-
-if (!exists("OVERRIDE_REPORT_YEAR")) {
-    OVERRIDE_REPORT_YEAR <- NA_integer_
-}
-
-if (!exists("WRITE_OUTPUT")) {
-    WRITE_OUTPUT <- NA_integer_
-}
 ###
 ### Define some local variables
 ###
@@ -47,26 +27,7 @@ nsc_config <- data.frame(
     schoolName=cfg$school$name
 )
 
-report_year <- as.numeric(format(Sys.time(), "%Y"))
 
-# Set report_month to actual month to allow adjustment of report_year based on month
-# Otherwise, set to -1
-report_month <- as.numeric(format(Sys.time(), "%m"))
-
-# For file names
-report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
-
-# Fix report year to be the year of the Fall term
-report_year <- report_year - if_else(report_month < 7, 1, 0)
-
-# Use the current report year to determine the folder for the data
-report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
-
-# Fix report year to be the Override year if provided
-report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year)
-
-# For spring and summer terms, set report year to fall's year
-#report_year <- report_year - if_else(report_month < 7, 1, 0) - 3 - if_else(IPEDS_Report==150,0,1)
 report_year_150 <- report_year - 3
 report_year_200 <- report_year - 4
 
@@ -80,20 +41,12 @@ report_cohorts <- c(report_ftft_150, report_ftft_200)
 
 report_cutoff_date <- as.Date(str_c(report_year,"08-31",sep="-"))
 
-#nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*", report_year, "fa.*csv")
-#nsc_detail_pat <- str_c(".*_DETLRPT_SE_.*(", report_year_150, "|", report_year_200, ")fa.*csv")
 nsc_detail_pat <- str_c("(", report_year_150, "|", report_year_200, ")fa",
                         "_DETLRPT_SE_.*.csv")
 nsc_folder <- "nsc"
 
 USE_FILE_COHORTS_150 <- report_year_150 < 2018
 USE_FILE_COHORTS_200 <- report_year_200 < 2018
-
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
-project_path <- "."
-
-#input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
 
 output_fn <- str_c( "hcc_ipeds_g2_", report_year, "_se.txt" )
 

@@ -1,77 +1,45 @@
-#OVERRIDE_REPORT_YEAR <- 2017 # Comment for current academic year's fall term
+---
+title: "IPEDS Student Financial Aid"
+#format: pdf
+format: html
+#  docx:
+#    highlight-style: github
+params:
+    report_code: "SFA"
+    write_output: TRUE
+    test: FALSE
+    cleanup: FALSE
+    current_datetime: ""
+    report_year: ""
+    report_data_term: ""
+---
 
-WRITE_OUTPUT <- TRUE
-#CLEANUP <- TRUE
-#TEST <- TRUE
+```{r setup}
+#| echo: false
+#| include: false
 
-ir_root <- "L:/IERG"
-
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
-
-require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-require(magrittr) # pipes
-require(stringr) # string manipulation
-require(lubridate)
-require(dbplyr)
-require(odbc)
-require(yaml)
-
-# Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    #library(devtools)
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
-
-sessionInfo()
-
-# Now, load the campus configuration
-cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-
-ipeds_unitid <- as.character(cfg$school$ipeds)
-
-if (!exists("OVERRIDE_REPORT_YEAR")) {
-    OVERRIDE_REPORT_YEAR <- NA_integer_
-}
-
-if (!exists("WRITE_OUTPUT")) {
-    WRITE_OUTPUT <- FALSE
-}
-
-if (!exists("TEST")) {
-    TEST <- FALSE
-}
-
-if (!exists("CLEANUP")) {
-    CLEANUP <- TRUE
-}
+source("_packages.r")
 
 report_year_data_adjustment <- 1
 
-# For file names
-report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
+source("_setup.r")
 
-report_year <- as.numeric(format(Sys.time(), "%Y"))
+```
 
-# Set report_month to actual month to allow adjustment of report_year based on month
-# Otherwise, set to -1
-report_month <- as.numeric(format(Sys.time(), "%m"))
+---
+date: "`r current_date`"
+---
 
-# Fix report year to be the year of the Fall term
-report_year <- report_year - if_else(report_month < 7, 1, 0)
-report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
+```{r get-data}
+#| echo: false
+#| include: false
 
-report_year <- ifelse(!is.na(OVERRIDE_REPORT_YEAR),OVERRIDE_REPORT_YEAR,report_year - report_year_data_adjustment)
+report_year_data_start <- report_data_year
 
-# We get one additional year if we need change from last year
-report_year_data_start <- report_year
-#report_year_data_end <- report_year - (dplyr::if_else( include_current_ay, 0, 1 ))
+report_data_term <- str_c(report_data_year, "FA")
+report_data_cohort <- str_c(report_data_year, "FT")
 
-report_term <- str_c(report_year, "FA")
-report_cohort <- str_c(report_year, "FT")
-
-report_year_date <- ymd( str_c(report_year, 10, 15) )
+#report_year_date <- ymd( str_c(report_year, 10, 15) )
 
 aid_federal_loans <- c("GSL","NDSL","PERK","PLUS","SMALT","USTF")
 aid_federal_non_pell <- c("ACG","ACG1","ACG2","IASG","SCH","SEOG") # Need to use Award_Type == 'F' for SCH
@@ -107,16 +75,6 @@ aid_group_4 <- unique(c(aid_federal_grant,
                         aid_federal_ws,
                         aid_federal_loans))
 
-fn_report_code <- "sfa"
-
-#project_path <- file.path(ir_root,"Reporting","IPEDS","R")
-project_path <- "." # file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
-#input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
-
-fn_SFA <- str_c("ipeds_",report_year + report_year_data_adjustment,"_",fn_report_code,"_",report_time_str,".txt")
-
-
 #######################################
 #
 # HERE IS WHERE THE DATA IS RETRIEVED
@@ -140,7 +98,7 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
     mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) - 1 )
 
 reporting_terms <- terms %>%
-    filter( Term_Reporting_Year == report_year,
+    filter( Term_Reporting_Year == report_data_year,
             Semester == "FA" )
 
 ###
@@ -153,14 +111,20 @@ ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="lat
     select( ID, Term_ID, Cohort, Term_Cohort ) %>%
     collect() %>%
     inner_join( terms %>% select(Term_ID,Cohort_Year=Term_Reporting_Year,Cohort_Start_Date=Term_Start_Date) ) %>%
-    filter( Cohort_Year %in% c(report_year),
-            Term_ID == report_term )
+    filter( Cohort_Year %in% c(report_data_year),
+            Term_ID == report_data_term )
 
-cs_comp <- getColleagueData( "CS_ACYR__CS_COMP", version="history" ) %>%
-    filter( CS.YEAR == report_year_data_start,
-            CS.COMP.ID %in% c("HOME","AWAY") ) %>%
-    select( CS.STUDENT.ID, CS.YEAR, CS.COMP.ID, EffectiveDatetime ) %>%
-    collect()
+# cs_comp <- getColleagueData( "CS_ACYR__CS_COMP", version="history" ) %>%
+#     filter( CS.YEAR == report_year_data_start,
+#             CS.COMP.ID %in% c("HOME","AWAY") ) %>%
+#     select( CS.STUDENT.ID, CS.YEAR, CS.COMP.ID, EffectiveDatetime ) %>%
+#     collect()
+
+# TODO: Need to incorporate this for Living Arrangement
+sa_term_hsg <- getColleagueData( "SA_ACYR__STATUS_FOR_TERM", version="history") %>%
+    filter( SA.YEAR == report_year_data_start,
+            SA.TERM.HSG %in% c("LP","OFF") ) %>%
+    select( SA.STUDENT.ID, SA.YEAR, SA.TERMS, SA.TERM.HSG )
 
 cs_acyr <- getColleagueData( "CS_ACYR" ) %>%
     filter( CS.YEAR == report_year_data_start ) %>%
@@ -210,7 +174,7 @@ person <- getColleagueData( "PERSON", version="history" ) %>%
             Residence_State = RESIDENCE.STATE,
             EffectiveDatetime ) %>%
     collect() %>%
-    filter( EffectiveDatetime <= as.Date(str_c(report_year,"-10-15")) ) %>%
+    filter( EffectiveDatetime <= as.Date(str_c(report_data_year,"-10-15")) ) %>%
     mutate( Residence_State = if_else(Residence_State=='', State, Residence_State) ) %>%
     mutate( Tuition_Type = if_else( Residence_State == "NC", "In-State", "Out-of-State" ) ) %>%
     group_by( ID ) %>%
@@ -218,11 +182,11 @@ person <- getColleagueData( "PERSON", version="history" ) %>%
     select( -c(State,EffectiveDatetime) ) %>%
     select( ID, First_Name, Last_Name, Residence_State, Tuition_Type )
 
-if (report_year < 2015) {
+if (report_data_year < 2015) {
     federal_award_types <- c("FPELL","NCCCG","NCELS","SEOG","SCH","GSL","USTF","STATE") # As listed in FA_TRANSMITTALS
     
     financial_aid1 <- getColleagueData( "FA_TRANSMITTALS" ) %>%
-        filter( FAX.TA.TERM == report_term ) %>%
+        filter( FAX.TA.TERM == report_data_term ) %>%
         select( ID=FAX.TA.STUDENT,
                 Term_ID=FAX.TA.TERM,
                 Award_Type=FAX.TA.AWARD, 
@@ -234,7 +198,7 @@ if (report_year < 2015) {
 } else {
 
     financial_aid_award_list <- getColleagueData( "SA_ACYR__AWARD_LIST", version = "history" ) %>%
-        filter( SA.YEAR == report_year ) %>%
+        filter( SA.YEAR == report_data_year ) %>%
         select( ID=SA.STUDENT.ID,
                 Term_Reporting_Year=SA.YEAR,
                 Award_Amount=SA.AMOUNT,
@@ -248,7 +212,7 @@ if (report_year < 2015) {
         collect()
     
     financial_aid <- getColleagueData( "SA_ACYR" ) %>%
-        filter( SA.YEAR == report_year ) %>%
+        filter( SA.YEAR == report_data_year ) %>%
         select( ID=SA.STUDENT.ID, 
                 Term_Reporting_Year=SA.YEAR, 
                 Award_Amount_Total=SA.AWARDED,
@@ -268,7 +232,7 @@ if (report_year < 2015) {
 # Group 1 includes all the fall enrolled students as of October 15. 
 #
 
-sfa_group1 <- fall_enrollment( report_year ) %>%
+sfa_group1 <- fall_enrollment( report_data_year ) %>%
     filter( Enrollment_Status != "Withdrawn" ) %>%
     select( ID, Term_ID, Term_Reporting_Year ) %>%
     left_join( person ) %>%
@@ -313,7 +277,7 @@ if (CLEANUP) {
 # Group 2 are the first-time, full-time degree seeking students from Group 1.
 #
 sfa_group2 <- sfa_group1 %>%
-    filter( Term_Cohort == report_cohort )
+    filter( Term_Cohort == report_data_cohort )
 
 sfa_group2_ids <- sfa_group2 %>%
     select(ID) %>%
@@ -696,15 +660,16 @@ if (WRITE_OUTPUT) {
 }
 
 if (TEST) {
-    write_csv( sfa_group1, file.path(output_path, str_c("sfa_group1_",report_year,".csv")), na = "")
-    write_csv( sfa_group2, file.path(output_path, str_c("sfa_group2_",report_year,".csv")), na = "")
-    write_csv( sfa_group3, file.path(output_path, str_c("sfa_group3_",report_year,".csv")), na = "")
-    write_csv( sfa_group4, file.path(output_path, str_c("sfa_group4_",report_year,".csv")), na = "")
-    write_csv( ipeds_saf_a, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"a",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_b, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"b",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_c, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"c",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_d, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"d",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_e, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"e",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_f, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"f",sep="_"),".csv")), na = "" )
-    write_csv( ipeds_saf_g, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"g",sep="_"),".csv")), na = "" )
+    write_csv( sfa_group1, file.path(output_path, glue("sfa_group1_{report_year}.csv")), na = "")
+    write_csv( sfa_group2, file.path(output_path, glue("sfa_group2_{report_year}.csv")), na = "")
+    write_csv( sfa_group3, file.path(output_path, glue("sfa_group3_{report_year}.csv")), na = "")
+    write_csv( sfa_group4, file.path(output_path, glue("sfa_group4_{report_year}.csv")), na = "")
+    write_csv( ipeds_saf_a, file.path(output_path, glue("ipeds_{report_year}_{fn}_a.csv")), na = "" )
+    write_csv( ipeds_saf_b, file.path(output_path, glue("ipeds_{report_year}_{fn}_b.csv")), na = "" )
+    write_csv( ipeds_saf_c, file.path(output_path, glue("ipeds_{report_year}_{fn}_c.csv")), na = "" )
+    write_csv( ipeds_saf_d, file.path(output_path, glue("ipeds_{report_year}_{fn}_d.csv")), na = "" )
+    write_csv( ipeds_saf_e, file.path(output_path, glue("ipeds_{report_year}_{fn}_e.csv")), na = "" )
+    write_csv( ipeds_saf_f, file.path(output_path, glue("ipeds_{report_year}_{fn}_f.csv")), na = "" )
+    write_csv( ipeds_saf_g, file.path(output_path, glue("ipeds_{report_year}_{fn}_g.csv")), na = "" )
 }
+```

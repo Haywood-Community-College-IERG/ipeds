@@ -1,77 +1,40 @@
-###
-### Define GLOBAL USER variables
-###
+---
+title: "IPEDS Outcomes Measures"
+#format: pdf
+format: html
+#  docx:
+#    highlight-style: github
+params:
+    report_code: "OM1"
+    write_output: TRUE
+    test: FALSE
+    cleanup: FALSE
+    current_datetime: ""
+    report_year: ""
+    report_data_term: ""
+---
 
-#OVERRIDE_REPORT_YEAR <- 2010 # Set to NA for current year
-WRITE_OUTPUT <- TRUE
+```{r setup}
+#| echo: false
+#| include: false
 
-ir_root <- "L:/IERG"
-
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
-
-cohort_from_file_year <- 2015
-
-###
-### End GLOBAL USER variables
-###
-
-require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-require(magrittr) # pipes
-require(stringr) # string manipulation
-require(dbplyr)
-require(odbc)
-require(yaml)
-
-# Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
-
-sessionInfo()
-
-# Now, load the campus configuration
-cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-
-### 
-### Define common report variables
-###
-if (!exists("OVERRIDE_REPORT_YEAR")) {
-    OVERRIDE_REPORT_YEAR <- NA_integer_
-}
-
-if (!exists("WRITE_OUTPUT")) {
-    WRITE_OUTPUT <- NA_integer_
-}
+source("_packages.r")
 
 report_year_data_adjustment <- 8
 
-current_year <- as.numeric(format(Sys.time(), "%Y"))
-current_month <- as.numeric(format(Sys.time(), "%m"))
+source("_setup.r")
 
-report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
+cohort_from_file_year <- 2015
 
-# Fix report year to be the year of the Fall term
-report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
-report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
+```
 
-# Fix report year to be the correct year for the data (or the OVERRIDE value)
-report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
-                       OVERRIDE_REPORT_YEAR,
-                       report_year - report_year_data_adjustment )
+---
+date: "`r current_date`"
+---
 
-# We get one additional year if we need change from last year
-report_year_data_start <- report_year
-report_year_data_end <- report_year
-
-#project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
-project_path <- "."
-#input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
-
-fn_OM1 <- stringr::str_c("ipeds_",report_year + report_year_data_adjustment,"_om1_",report_time_str,".txt")
-
+```{r get-data}
+#| echo: false
+#| include: false
 
 #
 # Get terms data from DB
@@ -90,16 +53,16 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
     mutate( Term_Reporting_Year = as.integer(Term_Reporting_Year) - 1 )
 
 reporting_terms <- terms %>%
-    filter( Term_Reporting_Year == report_year )
+    filter( Term_Reporting_Year == report_data_year )
 
 credential_terms <- terms %>%
-    filter( Term_Reporting_Year >= report_year,
-            Term_Reporting_Year <= report_year + 7 )
+    filter( Term_Reporting_Year >= report_data_year,
+            Term_Reporting_Year <= report_data_year + 7 )
 
 ###
 ### Get Cohort data from Colleague if year is before 2018, otherwise get it from ipeds_cohorts.csv
 ###
-# if (report_year < cohort_from_file_year) {
+# if (report_data_year < cohort_from_file_year) {
 #     student_acad_levels <- getColleagueData( "STUDENT_ACAD_LEVELS" ) %>%
 #         #filter( STA.FED.COHORT.GROUP == report_cohort ) %>%
 #         select( ID=STA.STUDENT, Cohort=STA.FED.COHORT.GROUP ) %>%
@@ -118,7 +81,7 @@ credential_terms <- terms %>%
                                Cohort_Year=Term_Reporting_Year,
                                Cohort_Start_Date=Term_Start_Date) ) %>%
         filter( !is.na(Cohort),
-                Cohort_Year == report_year )
+                Cohort_Year == report_data_year )
 #}
 
 # ipeds_cohorts <- read_csv(file.path(ipeds_path,"ipeds_cohorts.csv")) %>%
@@ -128,7 +91,7 @@ credential_terms <- terms %>%
 #                            Cohort_Year=Term_Reporting_Year,
 #                            Cohort_Start_Date=Term_Start_Date) ) %>%
 #     filter( !is.na(Cohort),
-#             Cohort_Year == report_year )
+#             Cohort_Year == report_data_year )
 
 ipeds_cohorts_ids <- ipeds_cohorts %>%
     select(ID) %>%
@@ -222,7 +185,7 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
             ) ) %>%
     
     # Only keep graduation records for this reporting year and following years.
-    inner_join( terms %>% filter( Term_Reporting_Year >= report_year) %>% select(Term_ID, Term_End_Date ) ) %>%
+    inner_join( terms %>% filter( Term_Reporting_Year >= report_data_year) %>% select(Term_ID, Term_End_Date ) ) %>%
     
     # We are using Cast_Date for the day of graduation
     mutate( Cast_Date = as.Date(Cast_Date) ) %>%
@@ -240,14 +203,14 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
 
 # Get terms into a character vector for the SQL query
 fa_terms <- terms %>%
-    filter( Term_Reporting_Year == report_year ) %>% 
+    filter( Term_Reporting_Year == report_data_year ) %>% 
     collect %$% 
     Term_ID
 
 #
 # For old data (pre-2015) need to get PELL information from FA_TRANSMITTALS.
 #
-if (report_year < 2015) {
+if (report_data_year < 2015) {
     federal_award_types <- c("FPELL") # As listed in FA_TRANSMITTALS
     
     pell_aid <- getColleagueData( "FA_TRANSMITTALS" ) %>%
@@ -321,7 +284,7 @@ sac_cohort <- ipeds_cohorts %>%
 # This is needed for Part D
 #
 not_graduated <- sac_cohort %>%
-    filter( Graduation_Date > as.Date(str_c(report_year+8,'-08-31')) ) %>%
+    filter( Graduation_Date > as.Date(str_c(report_data_year+8,'-08-31')) ) %>%
     select( ID, LINE, RECIPIENT_TYPE ) %>%
     distinct()
 
@@ -329,7 +292,7 @@ not_graduated <- sac_cohort %>%
 # This is needed for Part D
 #
 still_enrolled <- sac_load_by_term %>%
-    filter( Term_Reporting_Year == report_year + 8,
+    filter( Term_Reporting_Year == report_data_year + 8,
             Semester == "FA" ) %>%
     select( ID ) %>%
     distinct() %>%
@@ -348,7 +311,7 @@ sac_last_enrollment <- not_graduated %>%
     left_join( sac_load_by_term %>% 
                    inner_join( not_graduated %>% select(ID) ) %>%
                    left_join( terms %>% select(Term_ID, Term_Start_Date) ) %>%
-                   filter( Term_Start_Date <= as.Date(str_c(report_year+8,'-08-31')) ) ) %>%
+                   filter( Term_Start_Date <= as.Date(str_c(report_data_year+8,'-08-31')) ) ) %>%
     
     # By ID, find last term enrolled
     group_by( ID ) %>%
@@ -360,7 +323,7 @@ sac_last_enrollment <- not_graduated %>%
 #
 # This is needed for Part D
 #
-nsc_detail_pat_se <- str_c("(", report_year, "fa|", report_year+1, "sp|", report_year+1, "su)",
+nsc_detail_pat_se <- str_c("(", report_data_year, "fa|", report_data_year+1, "sp|", report_data_year+1, "su)",
                            "_DETLRPT_SE_.*csv")
 transferred <- list.files( path = nsc_path,
                            pattern = nsc_detail_pat_se, 
@@ -388,7 +351,7 @@ transferred <- list.files( path = nsc_path,
     
     # Remove the students who are still enrolled here at HCC
     anti_join( sac_load_by_term %>%
-                   filter( Term_Reporting_Year == report_year + 8,
+                   filter( Term_Reporting_Year == report_data_year + 8,
                            Semester == "FA" ) %>%
                    select( ID ) %>%
                    distinct() %>%
@@ -424,7 +387,7 @@ ipeds_om1_a <- sac_cohort %>%
 # Part B - FOUR years
 #
 ipeds_om1_b <- sac_cohort %>%
-    filter( Graduation_Date <= as.Date(str_c(report_year+4,'-08-31')) ) %>%
+    filter( Graduation_Date <= as.Date(str_c(report_data_year+4,'-08-31')) ) %>%
     group_by( ID, LINE, RECIPIENT_TYPE ) %>%
     summarise( Credential_Level = max(Credential_Level) ) %>%
     mutate( Associate = if_else(Credential_Level==10000,1,0),
@@ -442,7 +405,7 @@ ipeds_om1_b <- sac_cohort %>%
 # Part C - SIX years
 #
 ipeds_om1_c <- sac_cohort %>%
-    filter( Graduation_Date <= as.Date(str_c(report_year+6,'-08-31')) ) %>%
+    filter( Graduation_Date <= as.Date(str_c(report_data_year+6,'-08-31')) ) %>%
     group_by( ID, LINE, RECIPIENT_TYPE ) %>%
     summarise( Credential_Level = max(Credential_Level) ) %>%
     mutate( Associate = if_else(Credential_Level==10000,1,0),
@@ -461,7 +424,7 @@ ipeds_om1_c <- sac_cohort %>%
 # Part D - EIGHT years
 #
 ipeds_om1_d <- sac_cohort %>%
-    filter( Graduation_Date <= as.Date(str_c(report_year+8,'-08-31')) ) %>%
+    filter( Graduation_Date <= as.Date(str_c(report_data_year+8,'-08-31')) ) %>%
     group_by( ID, LINE, RECIPIENT_TYPE ) %>%
     summarise( Credential_Level = max(Credential_Level) ) %>%
     mutate( Associate = if_else(Credential_Level==10000,1,0),
@@ -482,8 +445,9 @@ ipeds_om1_d <- sac_cohort %>%
     select( UNITID, SURVSECT, PART, LINE, RECIPIENT_TYPE, AWARD_CERTIFICATE, AWARD_ASSOCIATES, AWARD_BACHELORS, Filler1, STILL_ENROLLED, ENROLLED_ANOTHER )
 
 if (WRITE_OUTPUT) {
-    write.table( data.frame(ipeds_om1_a), file.path(output_path, fn_OM1), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
-    write.table( data.frame(ipeds_om1_b), file.path(output_path, fn_OM1), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_om1_c), file.path(output_path, fn_OM1), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_om1_d), file.path(output_path, fn_OM1), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_om1_a), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
+    write.table( data.frame(ipeds_om1_b), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_om1_c), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_om1_d), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
 }
+```

@@ -8,24 +8,6 @@ input_path <- file.path(project_path, "input")
 nsc_path <- file.path(project_path, "nsc")
 output_path <- file.path(project_path, "output")
 
-package_date <- "2018-07-01" # date of the CRAN snapshot that the checkpoint
-                             # package uses
-
-# if checkpoint is not yet installed, install it (for people using this
-# system for the first time)
-if (!require(checkpoint)) {
-  install.packages("checkpoint")
-  require(checkpoint)
-}
-
-# install packages for the specified CRAN snapshot date
-checkpoint(snapshotDate = package_date,
-           checkpointLocation = ir_root,
-           project = project_path,
-           verbose = T,
-           scanForPackages = T,
-           use.knitr = F)
-
 library(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
 library(magrittr) # pipes
 #library(stringr) # string manipulation
