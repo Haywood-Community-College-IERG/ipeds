@@ -1,73 +1,38 @@
-###
-### Define GLOBAL USER variables
-###
+---
+title: "IPEDS Fall Enrollment"
+#format: pdf
+format: html
+#  docx:
+#    highlight-style: github
+params:
+    report_year: "2014"
+    report_data_term: ""
+    report_code: "EF2"
+    write_output: TRUE
+    test: FALSE
+    cleanup: FALSE
+    current_datetime: ""
+---
 
-fn_report_code <- "ef2"
+```{r setup}
+#| echo: false
+#| include: false
+
+source("_packages.r")
+
 report_year_data_adjustment <- 0
 
-# OVERRIDE_REPORT_YEAR <- 2019 # Set to NA for current academic year's fall term
+source("_setup.r")
 
-WRITE_OUTPUT <- TRUE
-CLEANUP <- FALSE
-TEST <- FALSE
+```
 
-# TODO: Faculty/Student Ratio
+---
+date: "`r current_date`"
+---
 
-ir_root <- "L:/IERG"
-
-###
-### End GLOBAL USER variables
-###
-
-nsc_path <- file.path(ir_root, "Data", "NSC")
-ipeds_path <- file.path(ir_root, "Data", "IPEDS")
-
-require(tidyverse) # ggplot2, dplyr, tidyr, readr, purrr, tibble
-require(magrittr) # pipes
-require(stringr) # string manipulation
-require(lubridate)
-require(dbplyr)
-require(odbc)
-require(yaml)
-
-# Enter local packages needed for this particular script 
-if (!require(haywoodcc)) {
-    devtools::install_git("https://github.com/haywood-ierg/haywoodcc.git", git="external")
-    require(haywoodcc)
-}
-
-sessionInfo()
-
-# Now, load the campus configuration
-cfg <- yaml.load_file(file.path(ir_root, "Data/config.yml"))
-
-### 
-### Define common report variables
-###
-if (!exists("OVERRIDE_REPORT_YEAR")) {
-    OVERRIDE_REPORT_YEAR <- NA_integer_
-}
-
-if (!exists("WRITE_OUTPUT")) {
-    WRITE_OUTPUT <- NA_integer_
-}
-
-current_year <- as.numeric(format(Sys.time(), "%Y"))
-current_month <- as.numeric(format(Sys.time(), "%m"))
-
-report_time_str <- format(Sys.time(),"%Y%m%d_%H%M")
-
-# Fix report year to be the year of the Fall term
-report_year <- as.integer(current_year- ifelse(current_month < 7, 1, 0))
-report_year_folder <- str_c(report_year,as.integer(substring(report_year,3,4))+1,sep='-')
-
-# Fix report year to be the correct year for the data (or the OVERRIDE value)
-report_year <- ifelse( !is.na(OVERRIDE_REPORT_YEAR),
-                       OVERRIDE_REPORT_YEAR,
-                       report_year - report_year_data_adjustment )
-
-report_year_data_start <- report_year
-#report_year_data_end <- report_year - (dplyr::if_else( include_current_ay, 0, 1 ))
+```{r setup-variables}
+#| echo: false
+#| include: false
 
 report_term <- str_c(report_year, "FA")
 
@@ -81,11 +46,12 @@ report_term_retention_PTFT <- str_c(report_year-1, "PT")
 
 report_year_date <- ymd( str_c(report_year, 10, 15) )
 
-project_path <- file.path(ir_root,"Reporting","IPEDS",report_year_folder,"R")
-input_path <- file.path(project_path, "input")
-output_path <- file.path(project_path, "output")
+```
 
-fn_EF2 <- stringr::str_c("ipeds_",report_year + report_year_data_adjustment,"_",fn_report_code,"_",report_time_str,".txt")
+```{r get-data}
+#| echo: false
+#| include: false
+#| cache: true
 
 #######################################
 #
@@ -328,7 +294,7 @@ retention_students <- fall_enrollment( report_year-1 ) %>%
 
 
 acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
-    filter( ACAD.INSTITUTIONS.ID == "0019844",
+    filter( ACAD.INSTITUTIONS.ID == instid,
             # ACAD.END.DATE > report_term_start_date || ACAD.CAST.DATE > report_term_start_date,
             !(ACAD.ACAD.PROGRAM %in% c("AHS", "=GED", "HSEGED")) ) %>%
     select( Campus_ID = ACAD.PERSON.ID,
@@ -377,6 +343,12 @@ if (CLEANUP) {
     rm( fall_students, retention_students, institutions_attend, acad_credentials, person )
 }
 
+```
+
+```{r build-export}
+#| echo: false
+#| include: false
+
 #
 # Part A is Fall Enrollment by Student Level, Attendance Status, Race/Ethnicity, and Gender
 #
@@ -412,8 +384,8 @@ ipeds_ef2_a <- fall_students_with_credentials %>%
     rename( LINE = Student_Level_A ) %>%
     
     # Add additional columns as per Import Specs
-    mutate( UNITID = '198668',
-            SURVSECT = 'EF2',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'A',
             CIPCODE = "99.0000" ) %>%
     
@@ -502,8 +474,8 @@ ipeds_ef2_g <- ipeds_ef2_g_dc %>%
     left_join( ipeds_ef2_g_dce ) %>%
 
         # Add additional columns as per Import Specs
-    mutate( UNITID = '198668',
-            SURVSECT = 'EF2',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'G',
             NOTENROLL = '      ',
             TOTAL = '      ' ) %>%
@@ -554,8 +526,8 @@ ipeds_ef2_b <- fall_students_with_credentials %>%
     rename( LINE = Status_Age_Category ) %>%
     
     # Add additional columns as per Import Specs
-    mutate( UNITID = '198668',
-            SURVSECT = 'EF2',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'B',
             SLEVEL = "1",
             Filler = '      ' ) %>%
@@ -595,8 +567,8 @@ ipeds_ef2_c <- fall_students_with_credentials %>%
     rename( LINE = State_Code ) %>%
     
     # Add additional columns as per Import Specs
-    mutate( UNITID = '198668',
-            SURVSECT = 'EF2',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'C',
             Filler = '       ' ) %>%
     
@@ -627,8 +599,8 @@ ipeds_ef2_d <- fall_students_with_credentials %>%
     summarise( EFE01 = sprintf("%06d", n()) ) %>%
     
     # Add additional columns as per Import Specs
-    mutate( UNITID = '198668',
-            SURVSECT = 'EF2',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'D',
             Filler = '         ' ) %>%
     
@@ -665,8 +637,8 @@ ipeds_ef2_e <- retention %>%
     spread( temp1, COHORT, fill="000000" ) %>%
     
     # Add additional columns as per Import Specs
-    mutate( UNITID = "198668",
-            SURVSECT = "EF2",
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'E',
             Filler = "         ",
             FT_EXCLUSIONS="000000",
@@ -696,23 +668,23 @@ if (CLEANUP) {
 ef2_f_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_, ST_STAFF_RATIO=NA_character_ )
 
 if (report_year==2019) {
-    ipeds_ef2_f <- data.frame( UNITID = '198668',
-                               SURVSECT = 'EF2',
+    ipeds_ef2_f <- data.frame( UNITID = ipeds_unitid,
+                               SURVSECT = params$report_code,
                                PART = 'F',
                                ST_STAFF_RATIO="000000" )
 } else if (report_year==2018) {
-    ipeds_ef2_f <- data.frame( UNITID = '198668',
-                               SURVSECT = 'EF2',
+    ipeds_ef2_f <- data.frame( UNITID = ipeds_unitid,
+                               SURVSECT = params$report_code,
                                PART = 'F',
                                ST_STAFF_RATIO="000013" )
 } else if (report_year==2017) {
-    ipeds_ef2_f <- data.frame( UNITID = '198668',
-                               SURVSECT = 'EF2',
+    ipeds_ef2_f <- data.frame( UNITID = ipeds_unitid,
+                               SURVSECT = params$report_code,
                                PART = 'F',
                                ST_STAFF_RATIO="000012" )
 } else {
-    ipeds_ef2_f <- data.frame( UNITID = '198668',
-                               SURVSECT = 'EF2',
+    ipeds_ef2_f <- data.frame( UNITID = ipeds_unitid,
+                               SURVSECT = params$report_code,
                                PART = 'F',
                                ST_STAFF_RATIO="000000" )
 }
@@ -722,18 +694,152 @@ if (CLEANUP) {
     rm( ef2_f_cols )
 }
 
+```
+
+# Data for report year = `r report_year`
+
+## Part A
+
+```{r part-a}
+#| echo: false
+#| include: true
+
+ipeds_ef2_a %>%
+    ungroup() %>%
+    select( CIPCODE, LINE, starts_with('EFRACE') ) %>%
+    mutate_at(c('LINE'),as.integer) %>%
+    mutate(across(starts_with('EFRACE'), as.integer)) %>%
+    gt()
+```
+
+## Part B
+
+```{r part-b}
+#| echo: false
+#| include: true
+
+ipeds_ef2_b %>%
+    ungroup() %>%
+    select( SLEVEL, LINE, EFAGE01, EFAGE02) %>%
+    mutate_at(c('LINE','SLEVEL'),as.integer) %>%
+    mutate_at(c('EFAGE01','EFAGE02'), as.integer) %>%
+    gt()
+```
+
+## Part C
+
+```{r part-c}
+#| echo: false
+#| include: true
+
+ipeds_ef2_c %>%
+    ungroup() %>%
+    select( LINE, EFRES01, EFRES02) %>%
+    mutate_at(c('LINE'),as.integer) %>%
+    mutate_at(c('EFRES01','EFRES02'), as.integer) %>%
+    gt()
+```
+
+## Part D
+
+```{r part-d}
+#| echo: false
+#| include: true
+
+ipeds_ef2_d %>%
+    ungroup() %>%
+    select( EFE01 ) %>%
+    mutate_at(c('EFE01'), as.integer) %>%
+    gt()
+```
+
+## Part E
+
+### Full-time
+
+```{r part-e-ft}
+#| echo: false
+#| include: true
+
+ipeds_ef2_e %>%
+    ungroup() %>%
+    select( PY=FT_PY_COHORT, EXCL=FT_EXCLUSIONS, INCL=FT_INCLUSIONS, ADJ=FT_ADJUSTED_COHORT, CY=FT_CY_COHORT, RET=RET_PCF) %>%
+    mutate_at(c('PY','EXCL','INCL','ADJ','CY','RET'), as.integer) %>%
+    gt()
+```
+
+### Part-time
+
+```{r part-e-pt}
+#| echo: false
+#| include: true
+
+ipeds_ef2_e %>%
+    ungroup() %>%
+    select( PY=PT_PY_COHORT, EXCL=PT_EXCLUSIONS, INCL=PT_INCLUSIONS, ADJ=PT_ADJUSTED_COHORT, CY=PT_CY_COHORT, RET=RET_PCP) %>%
+    mutate_at(c('PY','EXCL','INCL','ADJ','CY','RET'), as.integer) %>%
+    gt()
+```
+
+## Part F
+
+```{r part-f}
+#| echo: false
+#| include: true
+
+ipeds_ef2_f %>%
+    ungroup() %>%
+    select( ST_STAFF_RATIO ) %>%
+    mutate_at(c('ST_STAFF_RATIO'),as.integer) %>%
+    gt()
+```
+
+## Part G
+
+### Enrollment
+
+```{r part-g-enroll}
+#| echo: false
+#| include: true
+
+ipeds_ef2_g %>%
+    ungroup() %>%
+    select( LINE, EXCL=ENROLL_EXCLUSIVE, SOME=ENROLL_SOME, NOT=NOTENROLL ) %>%
+    mutate_at(c('LINE'),as.integer) %>%
+    mutate_at(c('EXCL','SOME','NOT'), as.integer) %>%
+    gt()
+```
+
+### PPS 
+
+```{r part-g-pps}
+#| echo: false
+#| include: true
+
+ipeds_ef2_g %>%
+    ungroup() %>%
+    select( LINE, PPS=INUS_PPS, NOTPPS=INUS_NOTPPS, UNKNOWN=INUS_UNKNOWN_STATE ) %>%
+    mutate_at(c('LINE'),as.integer) %>%
+    mutate_at(c('PPS','NOTPPS','UNKNOWN'), as.integer) %>%
+    gt()
+```
+
+```{r output-data}
+#| echo: false
+#| include: false
+
 #
 # Now, write all the parts out a flat file for import into IPEDS
 #
 
 if (WRITE_OUTPUT) {
-    write.table( data.frame(ipeds_ef2_a), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
-    write.table( data.frame(ipeds_ef2_g), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_ef2_b), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_ef2_c), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_ef2_d), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_ef2_e), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_ef2_f), file.path(output_path, fn_EF2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_a), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
+    write.table( data.frame(ipeds_ef2_g), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_b), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_c), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_d), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_e), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_ef2_f), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
 }
 
 if (TEST) {
@@ -747,3 +853,4 @@ if (TEST) {
     write_csv( ipeds_ef2_f, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"f",sep="_"),".csv")) )
     write_csv( ipeds_ef2_g, file.path(output_path, str_c(str_c("ipeds",report_year,fn_report_code,"g",sep="_"),".csv")) )
 }
+```

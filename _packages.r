@@ -6,6 +6,7 @@ library(tidyr)
 library(tibble)
 library(lubridate)
 library(readr)
+library(gt)
 
 library(ccdwr)
 library(haywoodcc)

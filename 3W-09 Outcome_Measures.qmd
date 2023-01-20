@@ -59,39 +59,15 @@ credential_terms <- terms %>%
     filter( Term_Reporting_Year >= report_data_year,
             Term_Reporting_Year <= report_data_year + 7 )
 
-###
-### Get Cohort data from Colleague if year is before 2018, otherwise get it from ipeds_cohorts.csv
-###
-# if (report_data_year < cohort_from_file_year) {
-#     student_acad_levels <- getColleagueData( "STUDENT_ACAD_LEVELS" ) %>%
-#         #filter( STA.FED.COHORT.GROUP == report_cohort ) %>%
-#         select( ID=STA.STUDENT, Cohort=STA.FED.COHORT.GROUP ) %>%
-#         collect() %>%
-#         mutate( Term_ID = str_c(substring(Cohort,1,4),"FA") ) %>%
-#         inner_join( terms %>% 
-#                         select(Term_ID,
-#                                Cohort_Year=Term_Reporting_Year,
-#                                Cohort_Start_Date=Term_Start_Date) )
-# } else {
-    ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema = "local", version = "history" ) %>%
-        select( ID, Term_ID, Cohort=OM_Cohort ) %>%
-        collect() %>%
-        inner_join( terms %>% 
-                        select(Term_ID,
-                               Cohort_Year=Term_Reporting_Year,
-                               Cohort_Start_Date=Term_Start_Date) ) %>%
-        filter( !is.na(Cohort),
-                Cohort_Year == report_data_year )
-#}
-
-# ipeds_cohorts <- read_csv(file.path(ipeds_path,"ipeds_cohorts.csv")) %>%
-#     select( ID, Term_ID, Cohort=OM_Cohort ) %>%
-#     inner_join( terms %>% 
-#                     select(Term_ID,
-#                            Cohort_Year=Term_Reporting_Year,
-#                            Cohort_Start_Date=Term_Start_Date) ) %>%
-#     filter( !is.na(Cohort),
-#             Cohort_Year == report_data_year )
+ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema = "local", version = "history" ) %>%
+    select( ID, Term_ID, Cohort=OM_Cohort ) %>%
+    collect() %>%
+    inner_join( terms %>% 
+                    select(Term_ID,
+                           Cohort_Year=Term_Reporting_Year,
+                           Cohort_Start_Date=Term_Start_Date) ) %>%
+    filter( !is.na(Cohort),
+            Cohort_Year == report_data_year )
 
 ipeds_cohorts_ids <- ipeds_cohorts %>%
     select(ID) %>%
@@ -157,7 +133,7 @@ sac_load_by_term <- student_acad_cred %>%
 # Now get graduation information with dates
 #
 acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
-    filter( ACAD.INSTITUTIONS.ID == "0019844",
+    filter( ACAD.INSTITUTIONS.ID == local(instid),
             coalesce(ACAD.TERM,'')!='',
             !(ACAD.ACAD.PROGRAM %in% c("AHS", "=GED", "HSEGED")) ) %>%
     select( ID = ACAD.PERSON.ID,
@@ -323,22 +299,21 @@ sac_last_enrollment <- not_graduated %>%
 #
 # This is needed for Part D
 #
-nsc_detail_pat_se <- str_c("(", report_data_year, "fa|", report_data_year+1, "sp|", report_data_year+1, "su)",
-                           "_DETLRPT_SE_.*csv")
-transferred <- list.files( path = nsc_path,
+nsc_detail_pat_se <- str_glue(".*_DETLRPT_SE_.*_{fn_report_code}_{report_year}_se\\.csv")
+transferred <- list.files( path = local_nsc_path,
                            pattern = nsc_detail_pat_se, 
                            full.names = TRUE, 
                            ignore.case = TRUE ) %>% 
     lapply(function(x) readr::read_csv(x, col_types = cols(.default = col_character()))) %>% 
     bind_rows %>%
-    separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep="\\." ) %>%
+    separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep=";" ) %>%
     
     # Exclude any enrollment records at HCC
-    filter( `College Code/Branch` != "008083-00") %>%
+    filter( `College Code/Branch` != str_glue("{fice}-{branch}") ) %>%
     ungroup() %>%
     
     # Reduce data to our cohort
-    inner_join( ipeds_cohorts_ids ) %>%
+    inner_join( ipeds_cohorts_ids, by = "ID" ) %>%
     
     # Combine the Enrollment and Graduation since all we need is the actual date
     mutate( Transfer_Date = as.Date(if_else(is.na(`Enrollment Begin`), `Graduation Date`, `Enrollment Begin`), "%Y%m%d") ) %>%
@@ -347,7 +322,7 @@ transferred <- list.files( path = nsc_path,
     select( ID, Transfer_Date ) %>%
     
     # Bring in last enrollment date for these students who have not yet graduated
-    inner_join( sac_last_enrollment ) %>%
+    inner_join( sac_last_enrollment, by = "ID" ) %>%
     
     # Remove the students who are still enrolled here at HCC
     anti_join( sac_load_by_term %>%
@@ -355,7 +330,8 @@ transferred <- list.files( path = nsc_path,
                            Semester == "FA" ) %>%
                    select( ID ) %>%
                    distinct() %>%
-                   inner_join( not_graduated ) ) %>%
+                   inner_join( not_graduated, by = "ID" ), 
+               by = "ID" ) %>%
 
     # Anyone with a Transfer date after their last term is a transfer student
     mutate( Transfer = (Transfer_Date >= Term_End_Date) * 1 ) %>%
@@ -363,11 +339,11 @@ transferred <- list.files( path = nsc_path,
     summarise( Transferred = max(Transfer) ) %>%
     filter( Transferred == 1 ) %>%
     select( -Transferred ) %>%
-    inner_join( not_graduated ) 
+    inner_join( not_graduated, by = "ID" ) 
     
 transferred_summary <- transferred %>%
     group_by( LINE, RECIPIENT_TYPE ) %>%
-    summarise( ENROLLED_ANOTHER = sprintf("%06d", n()) )
+    summarise( ENROLLED_ANOTHER = sprintf("%06d", n()), .groups = "keep" )
 
 #
 # Part A is the cohort
@@ -377,8 +353,8 @@ ipeds_om1_a <- sac_cohort %>%
     distinct() %>%
     group_by( LINE, RECIPIENT_TYPE ) %>%
     summarise( COHORT = sprintf("%06d", n()) ) %>%
-    mutate( UNITID = '198668',
-            SURVSECT = 'OM1',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'A',
             EXCLUSION = "000000" ) %>%
     select( UNITID, SURVSECT, PART, LINE, RECIPIENT_TYPE, COHORT, EXCLUSION )
@@ -395,8 +371,8 @@ ipeds_om1_b <- sac_cohort %>%
     group_by( LINE, RECIPIENT_TYPE ) %>%
     summarise( AWARD_ASSOCIATES = sprintf("%06d",sum(Associate)),
                AWARD_CERTIFICATE = sprintf("%06d",sum(Certificate)) ) %>%
-    mutate( UNITID = '198668',
-            SURVSECT = 'OM1',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'B',
             AWARD_BACHELORS = "000000" ) %>%
     select( UNITID, SURVSECT, PART, LINE, RECIPIENT_TYPE, AWARD_CERTIFICATE, AWARD_ASSOCIATES, AWARD_BACHELORS )
@@ -413,8 +389,8 @@ ipeds_om1_c <- sac_cohort %>%
     group_by( LINE, RECIPIENT_TYPE ) %>%
     summarise( AWARD_ASSOCIATES = sprintf("%06d",sum(Associate)),
                AWARD_CERTIFICATE = sprintf("%06d",sum(Certificate)) ) %>%
-    mutate( UNITID = '198668',
-            SURVSECT = 'OM1',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'C',
             AWARD_BACHELORS = "000000" ) %>%
     select( UNITID, SURVSECT, PART, LINE, RECIPIENT_TYPE, AWARD_CERTIFICATE, AWARD_ASSOCIATES, AWARD_BACHELORS )
@@ -434,8 +410,8 @@ ipeds_om1_d <- sac_cohort %>%
                AWARD_CERTIFICATE = sprintf("%06d",sum(Certificate)) ) %>%
     left_join( still_enrolled_summary ) %>%
     left_join( transferred_summary ) %>%
-    mutate( UNITID = '198668',
-            SURVSECT = 'OM1',
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code,
             PART = 'D',
             AWARD_BACHELORS = "000000",
             STILL_ENROLLED = coalesce(as.character(STILL_ENROLLED),"000000"),
@@ -443,6 +419,83 @@ ipeds_om1_d <- sac_cohort %>%
             Filler1 = "         "
     ) %>%
     select( UNITID, SURVSECT, PART, LINE, RECIPIENT_TYPE, AWARD_CERTIFICATE, AWARD_ASSOCIATES, AWARD_BACHELORS, Filler1, STILL_ENROLLED, ENROLLED_ANOTHER )
+
+```
+
+# Data for report year = `r report_year`
+
+## Part A
+
+```{r part-a}
+#| echo: false
+#| include: true
+
+ipeds_om1_a %>% 
+    ungroup() %>%
+    select( LINE, REC_TYPE=RECIPIENT_TYPE, COHORT, EXCLUSION ) %>%
+    mutate_at(c('LINE','REC_TYPE'),as.integer) %>%
+    mutate_at(c('COHORT','EXCLUSION'), as.integer) %>%
+    gt()
+
+```
+
+## Part B
+
+```{r part-b}
+#| echo: false
+#| include: true
+
+ipeds_om1_b %>% 
+    ungroup() %>%
+    select( LINE, REC_TYPE=RECIPIENT_TYPE, CERT=AWARD_CERTIFICATE, ASSOC=AWARD_ASSOCIATES, BACH=AWARD_BACHELORS ) %>%
+    mutate_at(c('LINE','REC_TYPE'),as.integer) %>%
+    mutate_at(c('CERT','ASSOC','BACH'), as.integer) %>%
+    gt()
+    
+```
+
+## Part C
+
+```{r part-c}
+#| echo: false
+#| include: true
+
+ipeds_om1_c %>% 
+    ungroup() %>%
+    select( LINE, REC_TYPE=RECIPIENT_TYPE, CERT=AWARD_CERTIFICATE, ASSOC=AWARD_ASSOCIATES, BACH=AWARD_BACHELORS ) %>%
+    mutate_at(c('LINE','REC_TYPE'),as.integer) %>%
+    mutate_at(c('CERT','ASSOC','BACH'), as.integer) %>%
+    gt()
+```
+
+## Part D
+
+```{r part-d-i}
+#| echo: false
+#| include: true
+
+ipeds_om1_d %>% 
+    ungroup() %>%
+    select( LINE, REC_TYPE=RECIPIENT_TYPE, CERT=AWARD_CERTIFICATE, ASSOC=AWARD_ASSOCIATES, BACH=AWARD_BACHELORS ) %>%
+    mutate_at(c('LINE','REC_TYPE'),as.integer) %>%
+    mutate_at(c('CERT','ASSOC','BACH'), as.integer) %>%
+    gt()
+```
+```{r part-d-ii}
+#| echo: false
+#| include: true
+
+ipeds_om1_d %>%
+    ungroup() %>%
+    select( LINE, REC_TYPE=RECIPIENT_TYPE, ST_ENRL=STILL_ENROLLED, AN_ENRL=ENROLLED_ANOTHER) %>%
+    mutate_at(c('LINE','REC_TYPE'),as.integer) %>%
+    mutate_at(c('ST_ENRL','AN_ENRL'), as.integer) %>%
+    gt()
+```
+
+```{r output-data}
+#| echo: false
+#| include: false
 
 if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_om1_a), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )

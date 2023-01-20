@@ -1,6 +1,6 @@
 # To override the current report year, set report_year here
 params <- list( current_datetime="",
-                report_year="",
+                report_year="2018",
                 report_data_term="",
                 write_output=TRUE,
                 test=FALSE,
