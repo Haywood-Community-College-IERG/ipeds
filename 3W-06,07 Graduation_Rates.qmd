@@ -7,7 +7,7 @@ format: html
 params:
     report_year: ""
     report_data_term: ""
-    report_code: "G2"
+    report_code: "GR2"
     report_code2: "G22"
     write_output: TRUE
     test: FALSE
@@ -549,6 +549,13 @@ ipeds_g2_d <- ipeds_terms %>%
         bind_rows( ipeds_g2_d_10 ) %>%
         arrange( LINE )        
 
+ipeds_g2_e <- tibble( UNITID = ipeds_unitid,
+                      SURVSECT = params$report_code,
+                      PART = 'E',
+                      GRGU01 = '2',
+                      GRGU011 = '000000',
+                      GRGU012 = '      ' )
+
 g22_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  Filler=NA_character_,ADEXCL=NA_character_,
                  COMPY4=NA_character_,STILLENROLLED=NA_character_ )
@@ -630,6 +637,19 @@ ipeds_g2_d %>%
     gt()
 ```
 
+## Part E
+
+```{r part-e}
+#| echo: false
+#| include: true
+
+ipeds_g2_e %>%
+    ungroup() %>%
+    select( GRGU01, GRGU011, GRGU012 ) %>%
+    mutate_at(c('GRGU01', 'GRGU011', 'GRGU012'),as.integer) %>%
+    gt()
+```
+
 ## Part A - 200
 
 ```{r part-a-200}
@@ -652,6 +672,7 @@ if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_g2_b), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
     write.table( data.frame(ipeds_g2_c), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
     write.table( data.frame(ipeds_g2_d), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    write.table( data.frame(ipeds_g2_e), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
     write.table( data.frame(ipeds_g22_a), file.path(output_path, fn2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
 }
 ```
