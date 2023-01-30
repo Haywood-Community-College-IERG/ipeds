@@ -5,7 +5,8 @@ params <- list( current_datetime="",
                 write_output=TRUE,
                 test=FALSE,
                 cleanup=FALSE,
-                report_code=""
+                report_code="GR2",
+                report_code2="G22"
               )
 
 report_year_data_adjustment <- 0
@@ -48,7 +49,7 @@ nsc_folder <- "nsc"
 USE_FILE_COHORTS_150 <- report_year_150 < 2018
 USE_FILE_COHORTS_200 <- report_year_200 < 2018
 
-output_fn <- str_c( "hcc_ipeds_g2_", report_year, "_se.txt" )
+output_fn <- str_glue( "hcc_ipeds_{report_code}_{report_year}_se.txt" )
 
 #
 # Get all the data from DB

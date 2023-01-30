@@ -24,3 +24,6 @@ _Archive.zip
 /*.html
 
 /.quarto/
+/html
+/4S-11-Fall_Enrollment_cache
+/.tours

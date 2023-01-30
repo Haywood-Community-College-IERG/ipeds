@@ -5,7 +5,7 @@ format: html
 #  docx:
 #    highlight-style: github
 params:
-    report_year: "2014"
+    report_year: ""
     report_data_term: ""
     report_code: "EF2"
     write_output: TRUE
@@ -192,7 +192,7 @@ student_enrollment_all_terms <- term_enrollment() %>%
 #
 # Get the fall enrolled students
 #
-fall_students <- fall_enrollment( report_year ) %>%
+fall_students <- fall_enrollment( report_data_year ) %>%
     rename( Campus_ID = ID ) %>%
     filter( Enrollment_Status != "Withdrawn" )
 
@@ -200,9 +200,14 @@ fall_students <- fall_enrollment( report_year ) %>%
 # Get the fall enrolled students
 # HS students are not considered credential seekers by IPEDS
 #
-credential_students <- fall_credential_seekers( report_year, exclude_hs = TRUE ) %>%
+credential_students <- fall_credential_seekers( report_data_year, 
+                                                exclude_hs = TRUE ) %>%
     rename( Campus_ID = ID )
     
+fall_students_with_credential_seeker <- fall_students %>%
+    left_join( credential_students, by = c("Campus_ID", "Term_ID") ) %>% 
+    mutate( Credential_Seeker = coalesce(Credential_Seeker,0) )
+
 # institutions_attend <- high_school_graduation_dates()
 institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     
@@ -216,7 +221,7 @@ institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     collect() %>%
 
     # Filter down the list of students
-    inner_join( ipeds_cohorts_ids ) %>%
+    inner_join( ipeds_cohorts_ids, by = "Campus_ID" ) %>%
     
     # For some reason, there are some records with multiple dates, keep the earliest one
     mutate( End_Date = strsplit(End_Dates,", ") ) %>%
@@ -229,31 +234,34 @@ institutions_attend <- getColleagueData( "INSTITUTIONS_ATTEND" ) %>%
     ungroup() %>%
     distinct()
 
-non_credential_seekers_ft <- fall_students %>%
-    anti_join( credential_students ) %>%
+
+non_credential_seekers_ft <- fall_students_with_credential_seeker %>%
+    filter( Credential_Seeker == 0 ) %>%
     select( Campus_ID ) %>%
-    left_join( student_enrollment_all_terms ) %>%
+    left_join( student_enrollment_all_terms, 
+               by = "Campus_ID" ) %>%
     select( Campus_ID, Term_ID ) %>%
-    left_join( terms %>% select(Term_ID,Term_Start_Date) ) %>%
+    left_join( terms %>% select(Term_ID,Term_Start_Date),
+               by = "Term_ID") %>%
     group_by( Campus_ID ) %>%
     summarise( Term_Start_Date = min(Term_Start_Date) ) %>%
     mutate( First_Term = 1 )
 
-non_credential_seekers <- fall_students %>%
-    anti_join( credential_students ) %>%
-    left_join( terms %>% select(Term_ID,Term_Start_Date) ) %>%
-    left_join( non_credential_seekers_ft ) %>%
+non_credential_seekers <- fall_students_with_credential_seeker %>%
+    filter( Credential_Seeker == 0 ) %>%
+    left_join( terms %>% select(Term_ID,Term_Start_Date), 
+               by = "Term_ID" ) %>%
+    left_join( non_credential_seekers_ft,
+               by = c("Campus_ID", "Term_Start_Date")) %>%
     mutate( Non_Degree_First_Term = coalesce(First_Term,0) ) %>%
     select( Campus_ID, Non_Degree_First_Term )
 
-fall_students_with_credentials <- fall_students %>%
-    left_join( ipeds_cohorts ) %>%
-    left_join( credential_students ) %>%
-    mutate( Credential_Seeker = coalesce(Credential_Seeker,0) ) %>%
-    left_join( non_credential_seekers ) %>%
+fall_students_with_credentials <- fall_students_with_credential_seeker %>%
+    left_join( ipeds_cohorts, by = c("Campus_ID", "Term_ID") ) %>%
+    left_join( non_credential_seekers, by = "Campus_ID" ) %>%
     mutate( Non_Degree_First_Term = coalesce(Non_Degree_First_Term,0) ) %>%
-    left_join( person ) %>%
-    left_join( institutions_attend ) %>%
+    left_join( person, by = "Campus_ID" ) %>%
+    left_join( institutions_attend, by = "Campus_ID" ) %>%
     mutate( Student_Level_Cohort = case_when(
                 is.na(Cohort) & Non_Degree_First_Term == 1 ~ "First-time",
                 is.na(Cohort) ~ "Continuing",
@@ -290,7 +298,7 @@ fall_students_with_credentials <- fall_students %>%
 
 retention_students <- fall_enrollment( report_year-1 ) %>%
     rename( Campus_ID = ID ) %>%
-    inner_join( ipeds_cohorts_ly_ft )
+    inner_join( ipeds_cohorts_ly_ft, by = c("Campus_ID", "Term_ID") )
 
 
 acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
@@ -307,10 +315,11 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     mutate( Cast_Date = as.Date(Cast_Date) ) %>%
     
     # Reduce the credentials to those in the retention cohort
-    inner_join( retention_students %>% select(Campus_ID,Cohort_Start_Date) ) %>%
+    inner_join( retention_students %>% select(Campus_ID,Cohort_Start_Date),
+                by = "Campus_ID") %>%
     
     # Get term date information to compare to credential date
-    left_join( terms %>% select(Term_ID, Term_End_Date ) ) %>%
+    left_join( terms %>% select(Term_ID, Term_End_Date ), by = "Term_ID" ) %>%
     mutate( Graduation_Date = if_else(Cast_Date < Term_End_Date, Term_End_Date, Cast_Date),
             Graduated = 1 ) %>%
     
@@ -325,13 +334,14 @@ retention <- retention_students %>%
     mutate( Status = substring(Cohort,5,6) ) %>%
     
     # Get graduation information
-    left_join( acad_credentials ) %>%
+    left_join( acad_credentials, by = "Campus_ID" ) %>%
     
     # Set all null values of Graduated to 0
     mutate( Graduated = coalesce(Graduated,0) ) %>%
     
     # Now, bring in credits from current fall term
-    left_join( fall_students %>% select(Campus_ID,NY_Credits=Credits) ) %>%
+    left_join( fall_students %>% select(Campus_ID,NY_Credits=Credits), 
+               by = "Campus_ID" ) %>%
     mutate( NY_Credits = coalesce(NY_Credits,0) ) %>%
         
     # Calculate retention
@@ -706,7 +716,7 @@ if (CLEANUP) {
 
 ipeds_ef2_a %>%
     ungroup() %>%
-    select( CIPCODE, LINE, starts_with('EFRACE') ) %>%
+    select( LINE, starts_with('EFRACE') ) %>%
     mutate_at(c('LINE'),as.integer) %>%
     mutate(across(starts_with('EFRACE'), as.integer)) %>%
     gt()
