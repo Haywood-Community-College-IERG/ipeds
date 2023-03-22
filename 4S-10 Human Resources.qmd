@@ -8,9 +8,11 @@ params:
     report_code: "HR1"
     write_output: TRUE
     test: TRUE
+    cleanup: FALSE
     current_datetime: ""
     report_year: ""
-    report_term: ""
+    report_data_term: ""
+
 ---
 
 ```{r setup}
@@ -36,6 +38,7 @@ date: "`r current_date`"
 ###
 ### Define some local variables
 ###
+max_date = ymd( "9999-12-31" )
 
 report_cutoff_day <- 1
 report_cutoff_month <- 11
@@ -54,10 +57,11 @@ hripeds_faculty_class <- c("2") # Faculty Classification
 hripeds_ft_statuses <- c("FT")
 hripeds_meds_values <- ""
 hripeds_medical_ind <- "N"
-hripeds_nh_end_day <- 31 # New Hire End Day
-hripeds_nh_end_month <- 10 # New Hire End Month
+# New hires are from 11/01 - 10/31
 hripeds_nh_start_day <- 1 # New Hire Start Day
 hripeds_nh_start_month <- 11 # New Hire Start Month
+hripeds_nh_end_day <- 31 # New Hire End Day
+hripeds_nh_end_month <- 10 # New Hire End Month
 hripeds_pos_medical <- ""
 hripeds_pt_statuses <- c("PT","PTB","PTT")
 hripeds_tenure_system <- "N"
@@ -69,13 +73,20 @@ courses_start_date <- ymd( str_c(report_year-1, report_cutoff_month, report_cuto
 courses_end_date <- ymd( str_c(report_year, report_cutoff_month, report_cutoff_day, sep='-') ) - days(1)
 
 validation_tables <- c("ALIEN.STATUSES",
+                        "APPOINTMENT.REASONS",
+                        "CLASSIFICATIONS",
                        "EEO.RPT.RANKS",
+                        "EEO.RPT.CLASSES",
                        "HR.STATUSES",
                        "IPEDS.CONTRACT.TYPES",
                        "IPEDS.FUNCTIONS",
                        "IPEDS.OCCUP.CATEGS",
+                        "N99.ACAD.LEVELS",
                        "PERSON.ETHNICS",
                        "PERSON.RACES",
+                        "POSITION.ENDING.REASONS",
+                        "POSITION.TYPES",
+                        "STATUS.ENDING.REASONS",
                        "TENURE.TYPES",
                        "TIME.UNITS")
 
@@ -116,6 +127,172 @@ reporting_terms <- terms %>%
     filter( Term_Reporting_Year == report_year,
             Semester == "FA" )
 
+
+##
+## Create staging data for building the full Personnel table
+##
+pospay <- getColleagueData( "POSPAY" ) %>% 
+    select( Pospay_ID = POSPAY.ID,
+            Pospay_Regular_ET = POSPAY.REGULAR.ET,
+            Pospay_Start_Date = POSPAY.START.DATE,
+            Pospay_End_Date = POSPAY.END.DATE ) %>% 
+    filter( Pospay_Start_Date <= new_hire_end_date,
+            coalesce(Pospay_End_Date,local(report_year_date)) >= new_hire_start_date ) %>% 
+    collect()
+    
+position__all_pospay <- getColleagueData( "POSITION__ALL_POSPAY", version="all" ) %>% 
+    select( Position_ID = POSITION.ID, Pospay_ID = ALL.POSPAY, EffectiveDatetime) %>% 
+    collect()
+
+position <- getColleagueData( "POSITION" ) %>% 
+    select( Position_ID = POSITION.ID, 
+            Position_Supervisor_ID = POS.SUPERVISOR.POS.ID,
+            Position_Title = POS.TITLE,
+            Position_Short_Title = POS.SHORT.TITLE,
+            Position_Type = POS.TYPE,
+            Position_Class = POS.CLASS,
+            EffectiveDatetime ) %>% 
+    collect() %>% 
+    left_join( position__all_pospay, by = join_by(Position_ID, EffectiveDatetime), multiple = "all" ) %>% 
+    left_join( pospay, by = "Pospay_ID" ) %>% 
+    filter( !is.na(Pospay_Start_Date) ) %>% 
+    select( -c(Pospay_ID, EffectiveDatetime) )
+
+
+perstat <- getColleagueData( "PERSTAT" ) %>% 
+    select( HRP_ID = PERSTAT.HRP.ID, 
+            Perstat_Start_Date = PERSTAT.START.DATE,
+            Perstat_End_Date = PERSTAT.END.DATE ) %>% 
+    filter( Perstat_Start_Date <= new_hire_end_date,
+            coalesce(Perstat_End_Date,local(report_year_date)) >= new_hire_start_date ) %>% 
+    collect()
+
+perpos <- getColleagueData( "PERPOS" ) %>% 
+    select( HRP_ID = PERPOS.HRP.ID,
+            Position_ID = POSITION.ID,
+            Perpos_Start_Date = PERPOS.START.DATE,
+            Perpos_End_Date = PERPOS.END.DATE ) %>% 
+    filter( Perpos_Start_Date <= new_hire_end_date,
+            coalesce(Perpos_End_Date,local(report_year_date)) >= new_hire_start_date ) %>% 
+    collect()
+
+perposwg <- getColleagueData( "PERPOSWG" ) %>% 
+    summarise( LAST_PAY_DATE = coalesce(max(PPWG.LAST.PAY.DATE),local(max_date)), 
+               .by = c(PPWG.HRP.ID,  PPWG.PERPOS.ID),
+               na.rm = TRUE ) %>% 
+    select( PPWG_HRP_ID = PPWG.HRP.ID,
+            PERPOSWG_PERPOS_ID = PPWG.PERPOS.ID,
+            LAST_PAY_DATE ) %>% 
+    filter( LAST_PAY_DATE >= local(new_hire_start_date) ) %>% 
+    collect()
+
+paytodat__ptdearn <- getColleagueData( "PAYTODAT__PTDEARN", version = "all" ) %>% 
+    filter( PTD.PERIOD.DATE >= local(new_hire_start_date) ) %>% 
+    select( PTD.EMPLOYEE.ID, Position_ID = PTD.POSITION.ID, PTD.PERIOD.DATE, PTD.PAY.CYCLE, PTD.SEQ.NO, EffectiveDatetime ) %>% 
+    collect()
+
+last_pay <- getColleagueData( "PAYTODAT" ) %>% 
+    filter( PTD.CHECK.ADVICE.DATE != '', PTD.NET > 0 ) %>% 
+    select( PTD.EMPLOYEE.ID, PTD.PERIOD.DATE, PTD.PAY.CYCLE, PTD.SEQ.NO, EffectiveDatetime ) %>% 
+    collect() %>% 
+    left_join( paytodat__ptdearn,
+               by = join_by(PTD.EMPLOYEE.ID, PTD.PERIOD.DATE, PTD.PAY.CYCLE, PTD.SEQ.NO, EffectiveDatetime),
+               multiple = "all" ) %>% 
+    mutate( ID_POS = str_glue("{PTD.EMPLOYEE.ID}-{Position_ID}") )# %>% 
+
+dates <- getColleagueData( "HRPER" ) %>% 
+    select( HRP_ID = HRPER.ID ) %>% 
+    collect() %>% 
+    left_join( perstat, by = "HRP_ID", multiple = "all" ) %>% 
+    left_join( perpos, by = "HRP_ID", multiple = "all" ) %>% 
+    left_join( position, by = "Position_ID", multiple = "all" ) %>% 
+    filter( !is.na(Position_ID) )
+
+staging <- dates %>% 
+    select( Campus_ID = HRP_ID, 
+            Position_ID, 
+            Perpos_Start_Date,
+            Perpos_End_Date,
+            Perstat_Start_Date,
+            Perstat_End_Date,
+            Pospay_Start_Date,
+            Pospay_End_Date ) %>% 
+    {
+        df <- .
+        bind_rows( 
+            df %>%
+                mutate( Start_Date = Perpos_Start_Date,
+                        End_Date = Perpos_End_Date,
+                        grouping = "POS" ),
+            df %>%
+                mutate( Start_Date = case_when( 
+                    Perstat_Start_Date < Perpos_Start_Date ~ Perpos_Start_Date,
+                    .default = Perstat_Start_Date ),
+                    End_Date = case_when( 
+                        Perstat_End_Date > Perpos_End_Date ~ Perpos_End_Date,
+                        .default = Perstat_End_Date ), 
+                    grouping = "STAT" ),
+            df %>%
+                mutate( Start_Date = case_when( 
+                    Pospay_Start_Date < Perpos_Start_Date & 
+                        Pospay_Start_Date < Perstat_Start_Date ~ case_when( 
+                            Perpos_Start_Date > Perstat_Start_Date ~ Perpos_Start_Date,
+                            .default = Perstat_Start_Date
+                        ),
+                    Pospay_Start_Date < Perpos_Start_Date ~ Perpos_Start_Date,
+                    Pospay_Start_Date < Perstat_Start_Date ~ Perstat_Start_Date,
+                    .default = Pospay_Start_Date ),
+                    End_Date = case_when( 
+                        Pospay_End_Date > Perpos_End_Date & 
+                            Pospay_End_Date > Perstat_End_Date ~ case_when( 
+                                Perpos_End_Date < Perstat_End_Date ~ Perpos_End_Date,
+                                .default = Perstat_End_Date
+                            ),
+                        Pospay_End_Date > Perpos_End_Date ~ Perpos_End_Date,
+                        Pospay_End_Date > Perstat_End_Date ~ Perstat_End_Date,
+                        .default = Pospay_End_Date ),
+                    grouping = "PAY" )
+        )
+    } %>% 
+    filter( Start_Date <= coalesce(End_Date,max_date) )
+
+dt2 <- staging %>% 
+    mutate( Start_Date_left = Start_Date,
+            End_Date_left = coalesce(End_Date,max_date) ) %>% 
+    left_join( staging %>% 
+                   mutate( Start_Date_right = Start_Date,
+                           End_Date_right = coalesce(End_Date,max_date) ),
+            by = join_by(Campus_ID, Position_ID, Start_Date, End_Date_left > Start_Date_right) ) %>% 
+    select( Campus_ID, 
+            Position_ID,
+            grouping = grouping.x, 
+            Start_Date,
+            End_Date = End_Date_left,
+            Perpos_Start_Date = Perpos_Start_Date.x,
+            Perpos_End_Date = Perpos_End_Date.y,
+            Perstat_Start_Date = Perstat_End_Date.x,
+            Perstat_End_Date = Perstat_End_Date.y,
+            Pospay_Start_Date = Pospay_Start_Date.x,
+            Pospay_End_Date = Pospay_End_Date.y
+            ) %>% 
+    {
+        df <- .
+        
+        df1 <- df %>%
+            arrange( Campus_ID, Position_ID, Start_Date, End_Date ) %>% 
+            mutate( row_nbr = row_number(), .by = c(Campus_ID,Position_ID,Start_Date) ) %>% 
+            filter( row_nbr == 1, Start_Date <= coalesce(End_Date,Start_Date) )
+        
+        df1 
+    }
+
+
+##
+## Now build the Personnel table
+## 
+
+
+
 valcodes_vals <- getColleagueData( "META__ALL_VALCODES__VALS", version="history" ) %>%
     filter( VALCODE.ID %in% validation_tables ) %>%
     select( VALCODE.ID,
@@ -135,7 +312,25 @@ valcodes <- getColleagueData( "META__ALL_VALCODES" ) %>%
     arrange( VALCODE.ID, VAL.INTERNAL.CODE )
 
 depts <- getColleagueData( "DEPTS" ) %>%
+    select( DEPT_ID = DEPTS.ID,
+            DEPT_DESC = DEPTS.DESC,
+            DEPT_DIVISION_ID = DEPTS.DIVISION,
+            DEPTS_HEAD_ID = DEPTS.HEAD.ID ) %>% 
     collect()
+
+eeo_cats <- getColleagueData( "EEO_CATEGORY" ) %>% 
+    select( EEO_Category_Code = EEO.CATEGORY.ID,
+            EEO_Category = EEO.DESC,
+            EEO_Category_Heading = EEO.RPT.HEADING,
+            EEO_Class_Code = EEO.RPT.CLASS ) %>% 
+    collect() %>% 
+    left_join( valcodes %>% 
+                   filter(VALCODE.ID == "EEO.RPT.CLASSES") %>% 
+                   select(EEO_Class_Code = VAL.INTERNAL.CODE,
+                          EEO_Class = VAL.EXTERNAL.REPRESENTATION), 
+               by = "EEO_Class_Code" )
+    
+        
 
 #locations <- getColleagueData( "LOCATION" ) %>%
 #    collect()

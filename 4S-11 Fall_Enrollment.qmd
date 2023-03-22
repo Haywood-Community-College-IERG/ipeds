@@ -88,7 +88,8 @@ reporting_terms <- terms %>%
 ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="latest" ) %>%
     select( Campus_ID = ID, Term_ID, Cohort, Term_Cohort ) %>%
     collect() %>%
-    inner_join( terms %>% select(Term_ID,Cohort_Year=Term_Reporting_Year,Cohort_Start_Date=Term_Start_Date) ) %>%
+    inner_join( terms %>% select(Term_ID,Cohort_Year=Term_Reporting_Year,Cohort_Start_Date=Term_Start_Date), 
+                by = "Term_ID" ) %>%
     filter( Cohort_Year %in% c(report_year, report_year - 1) )
 
 ipeds_cohorts_ids <- ipeds_cohorts %>%
@@ -300,6 +301,8 @@ retention_students <- fall_enrollment( report_year-1 ) %>%
     rename( Campus_ID = ID ) %>%
     inner_join( ipeds_cohorts_ly_ft, by = c("Campus_ID", "Term_ID") )
 
+#t<- retention_students %>%
+#    inner_join( ipeds_cohorts_ly_ft, by = c("Campus_ID", "Term_ID") )
 
 acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     filter( ACAD.INSTITUTIONS.ID == instid,
@@ -381,7 +384,7 @@ ipeds_ef2_a <- fall_students_with_credentials %>%
     
     # Add a dummy variable for summing
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
     
     # Flip the data frame to run Race across columns
     spread( IPEDS_Race_Code, Students, fill="000000" ) %>%
@@ -436,7 +439,7 @@ ipeds_ef2_g_dc <- fall_students_with_credentials %>%
     
     # Add a dummy variable for summing
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
 
     # Flip the data frame to run Race across columns
     spread( Distance_Courses, Students, fill="000000" ) %>%
@@ -471,7 +474,8 @@ ipeds_ef2_g_dce <- fall_students_with_credentials %>%
     summarise( INUS_PPS = sprintf("%06d", sum(INUS_PPS) ),
                INUS_NOTPPS = sprintf("%06d", sum(INUS_NOTPPS) ),
                INUS_UNKNOWN_STATE = sprintf("%06d", sum(INUS_UNKNOWN_STATE) ),
-               OUTSIDEUS = sprintf("%06d", sum(OUTSIDEUS) ) ) %>%
+               OUTSIDEUS = sprintf("%06d", sum(OUTSIDEUS) ),
+               .groups = "drop" ) %>%
     
     # Now rename the Student Level column as per Import Specs
     rename( LINE = Student_Level_G ) %>%
@@ -481,7 +485,7 @@ ipeds_ef2_g_dce <- fall_students_with_credentials %>%
 
 # Now put the final table together
 ipeds_ef2_g <- ipeds_ef2_g_dc %>% 
-    left_join( ipeds_ef2_g_dce ) %>%
+    left_join( ipeds_ef2_g_dce, by = "LINE" ) %>%
 
         # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
@@ -523,7 +527,7 @@ ipeds_ef2_b <- fall_students_with_credentials %>%
     
     # Add a dummy variable for summing
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .groups = "drop" ) %>%
     
     # Flip the data frame to run Race across columns
     spread( Gender, Students, fill="000000" ) %>%
@@ -571,7 +575,8 @@ ipeds_ef2_c <- fall_students_with_credentials %>%
     group_by( State_Code ) %>%
     
     summarise( EFRES01 = sprintf("%06d", n()),
-               EFRES02 = sprintf("%06d", sum(Within_1Yr)) ) %>%
+               EFRES02 = sprintf("%06d", sum(Within_1Yr)),
+               .groups = "drop" ) %>%
     
     # Now rename the Student Level column as per Import Specs
     rename( LINE = State_Code ) %>%
@@ -606,7 +611,7 @@ ipeds_ef2_d <- fall_students_with_credentials %>%
     filter( Student_Level_Cohort == "First-time",
             Credential_Seeker == 0 ) %>%
     
-    summarise( EFE01 = sprintf("%06d", n()) ) %>%
+    summarise( EFE01 = sprintf("%06d", n()), .groups = "drop" ) %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
@@ -638,7 +643,8 @@ ipeds_ef2_e <- retention %>%
     group_by( Status ) %>%
 
     summarise( PY_COHORT = sprintf("%06d", n()),
-               CY_COHORT = sprintf("%06d", sum(Retained)) ) %>%
+               CY_COHORT = sprintf("%06d", sum(Retained)),
+               .groups = "drop") %>%
     
     gather( temp, COHORT, -Status ) %>%
     unite( temp1, Status, temp, sep="_" ) %>%
