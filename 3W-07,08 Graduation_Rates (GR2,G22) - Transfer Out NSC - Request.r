@@ -1,6 +1,6 @@
 # To override the current report year, set report_year here
 params <- list( current_datetime="",
-                report_year="2018",
+                report_year="",
                 report_data_term="",
                 write_output=TRUE,
                 test=FALSE,
@@ -46,10 +46,10 @@ nsc_detail_pat <- str_c("(", report_year_150, "|", report_year_200, ")fa",
                         "_DETLRPT_SE_.*.csv")
 nsc_folder <- "nsc"
 
-USE_FILE_COHORTS_150 <- report_year_150 < 2018
-USE_FILE_COHORTS_200 <- report_year_200 < 2018
+USE_FILE_COHORTS_150 <- TRUE # report_year_150 < 2018
+USE_FILE_COHORTS_200 <- TRUE # report_year_200 < 2018
 
-output_fn <- str_glue( "hcc_ipeds_{report_code}_{report_year}_se.txt" )
+output_fn <- str_glue( "hcc_ipeds_{fn_report_code}_{report_year}_se.txt" )
 
 #
 # Get all the data from DB
@@ -80,8 +80,8 @@ report_term_start_date_200 <- (report_terms %>% collect %$% Term_Start_Date)[1]
 report_term_end_date_150 <- (report_terms %>% collect %$% Term_End_Date)[2]
 report_term_end_date_200 <- (report_terms %>% collect %$% Term_End_Date)[1]
 
-report_term_start_date <- pmin(report_term_start_date_150,report_term_start_date_200)
-report_term_end_date <- pmin(report_term_end_date_150,report_term_end_date_200)
+# report_term_start_date <- pmin(report_term_start_date_150,report_term_start_date_200)
+# report_term_end_date <- pmin(report_term_end_date_150,report_term_end_date_200)
 
 #
 # Reduce terms df to just the terms between the cohort term and August 31st of the year 3 or 4 years later.
@@ -99,7 +99,8 @@ ipeds_cohort_FILE_COHORTS <- getColleagueData( "ipeds_cohorts", schema="local" )
     inner_join( report_terms %>% 
                     filter( ( (Term_Reporting_Year==report_year_150) & USE_FILE_COHORTS_150 ) |
                                 ( (Term_Reporting_Year==report_year_200) & USE_FILE_COHORTS_200 ) ) %>%
-                    select(Term_ID, Cohort_Start_Date = Term_Start_Date) ) %>%
+                    select(Term_ID, Cohort_Start_Date = Term_Start_Date),
+                by = join_by(Term_ID) ) %>%
     select( -c(Term_ID) )
 
 ipeds_cohort_COLLEAGUE_COHORTS <- getColleagueData( "STUDENT_TERMS" ) %>%
@@ -111,7 +112,8 @@ ipeds_cohort_COLLEAGUE_COHORTS <- getColleagueData( "STUDENT_TERMS" ) %>%
     inner_join( report_terms %>% 
                     filter( ( (Term_Reporting_Year==report_year_150) & !USE_FILE_COHORTS_150 ) |
                             ( (Term_Reporting_Year==report_year_200) & !USE_FILE_COHORTS_200 ) ) %>%
-                    select(Term_ID, Cohort_Start_Date = Term_Start_Date) ) %>%
+                    select(Term_ID, Cohort_Start_Date = Term_Start_Date),
+                by = join_by(Term_ID)) %>%
     select( -c(Term_ID) )
 
 ipeds_cohort <- ipeds_cohort_FILE_COHORTS %>%
@@ -134,9 +136,10 @@ person <- person <- getColleagueData( "PERSON" ) %>%
     mutate( LastName = str_replace( LastName, "\\.", "" ) ) %>%
     filter( !str_detect(FirstName, "DO NOT USE"),
             !str_detect(toupper(LastName), "ZZZ") ) %>%
-    inner_join( ipeds_cohort ) %>%
+    inner_join( ipeds_cohort, by = join_by(ID) ) %>%
     arrange( Cohort_Start_Date, ID ) %>%
     mutate( ReturnRequestField = trimws(format(str_c(ID,Cohort,sep=";"),width=50)) ) %>%
     rename( SearchBeginDate = Cohort_Start_Date )
     
 nsc_out <- nsc_request( person, nsc_config, inquiryType = "SE", path = output_path, fn = output_fn )
+print(glue::glue("Output file: {output_path}/{output_fn}"))

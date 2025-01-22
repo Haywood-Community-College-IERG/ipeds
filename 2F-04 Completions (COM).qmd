@@ -7,6 +7,8 @@ format: html
 params:
     report_code: "COM"
     write_output: TRUE
+    test: FALSE
+    cleanup: FALSE
     current_datetime: ""
     report_year: ""
     report_term: ""
@@ -29,7 +31,7 @@ library(ccdwr)
 
 include_semesters <- c("FA","SP","SU")
 
-adjustment <- ifelse(length(include_semesters) > 1,1,0)
+report_year_data_adjustment <- ifelse(length(include_semesters) > 1,1,0)
 
 #warning("before")
 source("_setup.r")
@@ -171,21 +173,21 @@ acad_programs <- getColleagueData( "ACAD_PROGRAMS" ) %>%
             Catalogs = ACPG.CATALOGS ) %>%
     filter( !(Program %in% ignore_programs) ) %>%
     collect() %>%
-    filter( !grepl('^P.*',Program) & !grepl('^T.*',Program) ) %>%
+    filter( !grepl('^P.*',Program) & !grepl('^T.*',Program) & !grepl('^H.*',Program) ) %>%
     mutate( Catalog = strsplit(Catalogs, ", ") ) %>%
     unnest( cols = c(Catalog) ) %>%
     select( -Catalogs ) %>%
-    left_join( acad_program_reqmts_all ) %>%
-    left_join( acad_programs__user, by=c("Program") ) %>%
+    left_join( acad_program_reqmts_all, by = join_by(Program, Catalog) ) %>%
+    left_join( acad_programs__user, by = join_by(Program) ) %>%
     mutate( AWLEVEL = case_when(
                           substring(Program,1,1) == 'A' ~ " 3",
                           substring(Program,1,1) == 'D' ~ " 2",
                           substring(Program,1,1) == 'C' ~ "1b",
                           TRUE ~ '9'),
             Online_Type = coalesce(Online_Type,0) ) %>%
-    left_join( distance_programs ) %>%
+    left_join( distance_programs, by = join_by(Major) ) %>%
     mutate( Is_Distance = coalesce(Is_Distance,'N') ) %>%
-    left_join(onsite_components, by="Program") %>%
+    left_join( onsite_components, by = join_by(Program) ) %>%
     mutate( Mandatory = if_else(coalesce(Mandatory,'N')=='Y',1,0),
             Optional = if_else(coalesce(Optional,'N')=='Y',1,0) )
 
@@ -196,12 +198,13 @@ active_programs <- acad_programs %>%
     arrange( CIPCODE )
 
 acad_programs_ry <- acad_programs %>%
-    inner_join( acad_program_reqmts_ry ) %>%
+    inner_join( acad_program_reqmts_ry, by = join_by(Program) ) %>%
     select( CIPCODE, AWLEVEL, Is_Distance, Mandatory, Optional ) %>%
     distinct() %>%
-    group_by( CIPCODE, AWLEVEL, Is_Distance ) %>%
+    # group_by( CIPCODE, AWLEVEL, Is_Distance ) %>%
     summarise( Mandatory = max(Mandatory),
-               Optional = max(Optional) ) %>%
+               Optional = max(Optional),
+               .by = c(CIPCODE, AWLEVEL, Is_Distance) ) %>%
     mutate( MAJORNUM = 1, 
             CRACE01 = "000000", CRACE02 = "000000",
             CRACE25 = "000000", CRACE26 = "000000",
@@ -250,10 +253,10 @@ acad_credentials_base <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
     collect() %>%
     mutate( Graduated = 1,
             MAJORNUM = 1 ) %>%
-    left_join( person ) %>%
-    left_join( student_programs ) %>%
-    left_join( acad_programs ) %>%
-    left_join( acad_program_reqmts_ry ) %>%
+    left_join( person, by = join_by(Student_ID) ) %>%
+    left_join( student_programs, by = join_by(Student_ID, Program) ) %>%
+    left_join( acad_programs, by = join_by(Program, Catalog) ) %>%
+    left_join( acad_program_reqmts_ry, by = join_by(Program) ) %>%
     mutate( Current_Program = coalesce(Current_Program,"No"),
             Age = as.integer(as.duration(Birth_Date %--% Graduation_Date) / dyears(1)) ) %>%
     arrange( CIPCODE, AWLEVEL, Program, Catalog, Student_ID ) %>%
@@ -304,7 +307,7 @@ acad_credentials_age_groups <- acad_credentials_base %>%
     select( Student_ID, Age_Group )
     
 acad_credentials <- acad_credentials_base %>%
-    left_join( acad_credentials_age_groups )
+    left_join( acad_credentials_age_groups, by = join_by(Student_ID) )
 
 acad_credentials_programs <- acad_credentials %>%
     select( CIPCODE, AWLEVEL ) %>%
@@ -314,68 +317,131 @@ include_cips <- active_programs %>%
     anti_join( acad_credentials_programs, by = c("CIPCODE","AWLEVEL") ) %>%
     mutate( Report_Year = catalog_year )
 
-race_gender_cols <- c( CRACE01=NA_character_, CRACE02=NA_character_,
-                       CRACE25=NA_character_, CRACE26=NA_character_,
-                       CRACE27=NA_character_, CRACE28=NA_character_,
-                       CRACE29=NA_character_, CRACE30=NA_character_,
-                       CRACE31=NA_character_, CRACE32=NA_character_,
-                       CRACE33=NA_character_, CRACE34=NA_character_,
-                       CRACE35=NA_character_, CRACE36=NA_character_,
-                       CRACE37=NA_character_, CRACE38=NA_character_,
-                       CRACE13=NA_character_, CRACE14=NA_character_ )
-age_cols <- c( AGE1=NA_character_, 
-               AGE2=NA_character_, 
-               AGE3=NA_character_, 
-               AGE4=NA_character_, 
-               AGE5=NA_character_ )
-gender_cols <- c( CRACE15=NA_character_, 
-                  CRACE16=NA_character_ )
-race_cols <- c( CRACE17=NA_character_, 
-                CRACE41=NA_character_, 
-                CRACE42=NA_character_,
-                CRACE43=NA_character_, 
-                CRACE44=NA_character_, 
-                CRACE45=NA_character_,
-                CRACE46=NA_character_, 
-                CRACE47=NA_character_, 
-                CRACE23=NA_character_ )
-com_a_cols <- c( UNITID=NA_character_, 
-                 SURVSECT=NA_character_, 
-                 PART=NA_character_,
-                 MAJORNUM=NA_character_, 
-                 CIPCODE=NA_character_, 
-                 AWLEVEL=NA_character_, 
-                 race_gender_cols )
-com_b_cols <- c( UNITID=NA_character_, 
-                 SURVSECT=NA_character_, 
-                 PART=NA_character_,
-                 MAJORNUM=NA_character_, 
-                 CIPCODE=NA_character_, 
-                 AWLEVEL=NA_character_, 
-                 DistanceED=NA_character_ )
-com_c_cols <- c( UNITID=NA_character_, 
-                 SURVSECT=NA_character_, 
-                 PART=NA_character_,
-                 race_gender_cols )
-com_d_cols <- c( UNITID=NA_character_, 
-                 SURVSECT=NA_character_, 
-                 PART=NA_character_,
-                 CTLEVEL=NA_character_, 
-                 gender_cols, 
-                 Filler_1=NA_character_, 
-                 race_cols, 
-                 Filler_2=NA_character_, 
-                 age_cols )
-com_e_cols <- c( UNITID=NA_character_, 
-                 SURVSECT=NA_character_, 
-                 PART=NA_character_,
-                 CGU01=NA_character_, 
-                 CGU011=NA_character_, 
-                 CGU012=NA_character_,
-                 Filler_1=NA_character_, 
-                 CGU02=NA_character_,
-                 CGU021=NA_character_,
-                 CGU022=NA_character_ )
+
+# race_gender_cols <- c( CRACE01=NA_character_, CRACE02=NA_character_,
+#                        CRACE25=NA_character_, CRACE26=NA_character_,
+#                        CRACE27=NA_character_, CRACE28=NA_character_,
+#                        CRACE29=NA_character_, CRACE30=NA_character_,
+#                        CRACE31=NA_character_, CRACE32=NA_character_,
+#                        CRACE33=NA_character_, CRACE34=NA_character_,
+#                        CRACE35=NA_character_, CRACE36=NA_character_,
+#                        CRACE37=NA_character_, CRACE38=NA_character_,
+#                        CRACE13=NA_character_, CRACE14=NA_character_ )
+race_gender_cols <- tibble( CRACE01=character(), CRACE02=character(),
+                            CRACE25=character(), CRACE26=character(),
+                            CRACE27=character(), CRACE28=character(),
+                            CRACE29=character(), CRACE30=character(),
+                            CRACE31=character(), CRACE32=character(),
+                            CRACE33=character(), CRACE34=character(),
+                            CRACE35=character(), CRACE36=character(),
+                            CRACE37=character(), CRACE38=character(),
+                            CRACE13=character(), CRACE14=character() )
+# age_cols <- c( AGE1=NA_character_, 
+#                AGE2=NA_character_, 
+#                AGE3=NA_character_, 
+#                AGE4=NA_character_, 
+#                AGE5=NA_character_ )
+age_cols <- tibble( AGE1=character(), 
+                    AGE2=character(), 
+                    AGE3=character(), 
+                    AGE4=character(), 
+                    AGE5=character() )
+#gender_cols <- c( CRACE15=NA_character_, 
+#                  CRACE16=NA_character_ )
+gender_cols <- tibble( CRACE15=character(), 
+                       CRACE16=character() )
+# race_cols <- c( CRACE17=NA_character_, 
+#                 CRACE41=NA_character_, 
+#                 CRACE42=NA_character_,
+#                 CRACE43=NA_character_, 
+#                 CRACE44=NA_character_, 
+#                 CRACE45=NA_character_,
+#                 CRACE46=NA_character_, 
+#                 CRACE47=NA_character_, 
+#                 CRACE23=NA_character_ )
+race_cols <- tibble( CRACE17=character(), 
+                     CRACE41=character(), 
+                     CRACE42=character(),
+                     CRACE43=character(), 
+                     CRACE44=character(), 
+                     CRACE45=character(),
+                     CRACE46=character(), 
+                     CRACE47=character(), 
+                     CRACE23=character() )
+# com_a_cols <- c( UNITID=NA_character_, 
+#                  SURVSECT=NA_character_, 
+#                  PART=NA_character_,
+#                  MAJORNUM=NA_character_, 
+#                  CIPCODE=NA_character_, 
+#                  AWLEVEL=NA_character_, 
+#                  race_gender_cols )
+com_a_cols <- tibble( UNITID=character(), 
+                      SURVSECT=character(), 
+                      PART=character(),
+                      MAJORNUM=character(), 
+                      CIPCODE=character(), 
+                      AWLEVEL=character() ) %>%
+    bind_cols( race_gender_cols )
+# com_b_cols <- c( UNITID=NA_character_, 
+#                  SURVSECT=NA_character_, 
+#                  PART=NA_character_,
+#                  MAJORNUM=NA_character_, 
+#                  CIPCODE=NA_character_, 
+#                  AWLEVEL=NA_character_, 
+#                  DistanceED=NA_character_ )
+com_b_cols <- tibble( UNITID=character(), 
+                      SURVSECT=character(), 
+                      PART=character(),
+                      MAJORNUM=character(), 
+                      CIPCODE=character(), 
+                      AWLEVEL=character(), 
+                      DistanceED=character() )
+# com_c_cols <- c( UNITID=NA_character_, 
+#                  SURVSECT=NA_character_, 
+#                  PART=NA_character_,
+#                  race_gender_cols )
+com_c_cols <- tibble( UNITID=character(), 
+                      SURVSECT=character(), 
+                      PART=character() ) %>%
+    bind_cols( race_gender_cols )
+# com_d_cols <- c( UNITID=NA_character_, 
+#                  SURVSECT=NA_character_, 
+#                  PART=NA_character_,
+#                  CTLEVEL=NA_character_, 
+#                  gender_cols, 
+#                  Filler_1=NA_character_, 
+#                  race_cols, 
+#                  Filler_2=NA_character_, 
+#                  age_cols )
+com_d_cols <- tibble( UNITID=character(), 
+                      SURVSECT=character(), 
+                      PART=character(),
+                      CTLEVEL=character() ) %>%
+    bind_cols( gender_cols ) %>%
+    add_column( Filler_1=character() ) %>%
+    bind_cols( race_cols ) %>%
+    add_column( Filler_2=character() ) %>%
+    bind_cols( age_cols )
+# com_e_cols <- c( UNITID=NA_character_, 
+#                  SURVSECT=NA_character_, 
+#                  PART=NA_character_,
+#                  CGU01=NA_character_, 
+#                  CGU011=NA_character_, 
+#                  CGU012=NA_character_,
+#                  Filler_1=NA_character_, 
+#                  CGU02=NA_character_,
+#                  CGU021=NA_character_,
+#                  CGU022=NA_character_ )
+com_e_cols <- tibble( UNITID=character(), 
+                      SURVSECT=character(), 
+                      PART=character(),
+                      CGU01=character(), 
+                      CGU011=character(), 
+                      CGU012=character(),
+                      Filler_1=character(), 
+                      CGU02=character(),
+                      CGU021=character(),
+                      CGU022=character() )
 
 include_cips_a <- include_cips %>%
     filter( Report_Year == report_year ) %>%
@@ -398,13 +464,15 @@ include_cips_b <- include_cips %>%
 #
 ipeds_com_a_base <- acad_credentials %>%
     distinct() %>%
-    group_by( MAJORNUM, CIPCODE, AWLEVEL, IPEDS_Race_Gender_Code ) %>%
+    #group_by( MAJORNUM, CIPCODE, AWLEVEL, IPEDS_Race_Gender_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ),
+               .by = c( MAJORNUM, CIPCODE, AWLEVEL, IPEDS_Race_Gender_Code ) ) %>%
     bind_rows( include_cips_a ) %>%
     spread( IPEDS_Race_Gender_Code, Students, fill="000000" ) %>%
-    ungroup() %>%
-    add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
+    #ungroup() %>%
+    #add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
+    bind_rows( race_gender_cols ) %>%
     mutate_at(.vars=names(race_gender_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
@@ -425,17 +493,18 @@ ipeds_programs <- ipeds_com_a %>%
     select( CIPCODE, AWLEVEL ) %>%
     group_by( CIPCODE ) %>%
     # summarise_each(funs(paste(., collapse = ", "))) %>%
-    summarise( across( .fns = ~ paste(.x, collapse = ", ") ) )
+    summarise( across(.cols = everything(), 
+                      .fns = ~ paste(.x, collapse = ", ") ) )
 
 ipeds_com_b_base <- acad_credentials %>%
     distinct() %>%
     mutate( DistanceED = if_else( Is_Distance == 'Y', 1, 
                                   if_else( Is_Distance == 'N', 2, NA_real_ ) )
     ) %>%
-    group_by( MAJORNUM, CIPCODE, AWLEVEL ) %>%
-    summarise( DistanceED = min(DistanceED)
-               ) %>%
-    ungroup() %>%
+    #group_by( MAJORNUM, CIPCODE, AWLEVEL ) %>%
+    summarise( DistanceED = min(DistanceED),
+               .by = c( MAJORNUM, CIPCODE, AWLEVEL ) ) %>%
+    # ungroup() %>%
     bind_rows( include_cips_b ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
@@ -456,12 +525,14 @@ ipeds_com_b <- bind_rows( ipeds_com_b_base, ipeds_com_b_missing ) %>%
 ipeds_com_c <- acad_credentials %>%
     select( Student_ID, IPEDS_Race_Gender_Code ) %>%
     distinct() %>%
-    group_by( IPEDS_Race_Gender_Code ) %>%
+    #group_by( IPEDS_Race_Gender_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ),
+               .by = c( IPEDS_Race_Gender_Code ) ) %>%
     spread( IPEDS_Race_Gender_Code, Students, fill="000000" ) %>%
-    ungroup() %>%
-    add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
+    #ungroup() %>%
+    #add_column( !!!race_gender_cols[!names(race_gender_cols) %in% names(.)] ) %>%
+    bind_rows( race_gender_cols ) %>%
     mutate_at(.vars=names(race_gender_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
@@ -472,12 +543,14 @@ ipeds_com_d_race <- acad_credentials %>%
     select( Student_ID, IPEDS_Race_Code, CTLEVEL = AWLEVEL ) %>%
     mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
-    group_by( CTLEVEL, IPEDS_Race_Code ) %>%
+    #group_by( CTLEVEL, IPEDS_Race_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ),
+               .by = c( CTLEVEL, IPEDS_Race_Code ) ) %>%
     spread( IPEDS_Race_Code, Students, fill="000000" ) %>%
-    ungroup() %>%
-    add_column( !!!race_cols[!names(race_cols) %in% names(.)] ) %>%
+    #ungroup() %>%
+    #add_column( !!!race_cols[!names(race_cols) %in% names(.)] ) %>%
+    bind_rows( race_cols ) %>%
     mutate_at(.vars=names(race_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
@@ -487,12 +560,14 @@ ipeds_com_d_gender <- acad_credentials %>%
     select( Student_ID, SEX, CTLEVEL = AWLEVEL ) %>%
     mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
-    group_by( CTLEVEL, SEX ) %>%
+    #group_by( CTLEVEL, SEX ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ),
+               .by = c( CTLEVEL, SEX ) ) %>%
     spread( SEX, Students, fill="000000" ) %>%
-    ungroup() %>%
-    add_column( !!!gender_cols[!names(gender_cols) %in% names(.)] ) %>%
+    #ungroup() %>%
+    #add_column( !!!gender_cols[!names(gender_cols) %in% names(.)] ) %>%
+    bind_rows( gender_cols ) %>%
     mutate_at(.vars=names(gender_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
@@ -502,20 +577,22 @@ ipeds_com_d_age <- acad_credentials %>%
     select( Student_ID, Age_Group, CTLEVEL = AWLEVEL ) %>%
     mutate( CTLEVEL = case_when( CTLEVEL=="1b"~"9",TRUE~substring(CTLEVEL,2,2)) ) %>%
     distinct() %>%
-    group_by( CTLEVEL, Age_Group ) %>%
+    #group_by( CTLEVEL, Age_Group ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ),
+               .by = c( CTLEVEL, Age_Group ) ) %>%
     spread( Age_Group, Students, fill="000000" ) %>%
-    ungroup() %>%
-    add_column( !!!age_cols[!names(age_cols) %in% names(.)] ) %>%
+    #ungroup() %>%
+    #add_column( !!!age_cols[!names(age_cols) %in% names(.)] ) %>%
+    bind_rows( age_cols ) %>%
     mutate_at(.vars=names(age_cols), function(x) {return( coalesce(x,"000000") )} ) %>%
     mutate( UNITID = cfg$school$ipeds,
             SURVSECT = toupper(fn_report_code),
             PART = 'D' ) #%>%
 
 ipeds_com_d <- ipeds_com_d_race %>%
-    left_join( ipeds_com_d_age ) %>%
-    left_join( ipeds_com_d_gender ) %>%
+    left_join( ipeds_com_d_age, by = join_by(CTLEVEL, UNITID, SURVSECT, PART) ) %>%
+    left_join( ipeds_com_d_gender, by = join_by(CTLEVEL, UNITID, SURVSECT, PART) ) %>%
     mutate( Filler_1 = "      ",
             Filler_2 = "      " ) %>%
     select( all_of(names(com_d_cols)) ) # select_( .dots=names(com_d_cols) )

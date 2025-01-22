@@ -5,7 +5,7 @@ format: html
 #  docx:
 #    highlight-style: github
 params:
-    report_year: ""
+    report_year: "2023"
     report_data_term: ""
     report_code: "SFA"
     write_output: TRUE
@@ -48,13 +48,13 @@ aid_federal_pell <- c("PELL")
 aid_federal_grant <- unique(c(aid_federal_non_pell,aid_federal_pell))
 aid_federal_ws <- c("FWS")
 aid_federal_titleiv <- unique(c(aid_federal_non_pell,aid_federal_pell,aid_federal_ws,aid_federal_loans))
-aid_federal_other <- c("CARES") # CARES funds are not Title IV
-aid_state_local <- c("NCCG","SCH","SSIG","STATE","NCSAG","NCLCG")  # Need to use Award_Type == 'S' for SCH
+aid_federal_other <- c("CARES", "HRF2U","HRF3U") # CARES funds are not Title IV
+aid_state_local <- c("NCCG","SCH","SSIG","STATE","NCSAG","NCLCG", "NCLLC", "NCCHD", "FTRAN", "FHOUS", "FUTIL", "FMED", "FCOA", "FCARE", "LEAF", "GEER2", "STWD", "NCNBG", "NCSTS", "CLEAF")  # Need to use Award_Type == 'S' for SCH
 aid_institution <- c("SCH")  # Need to use Award_Type == 'I'
 aid_other <- c("ALT","SCH","VET") # Need to use Award_Type == 'O'
 aid_other_loans <- c("ALT","WFALT","SMALT")
 aid_loans <- unique(c(aid_federal_loans,aid_other_loans))
-aid_veterans_gi <- c("CH33")
+aid_veterans_gi <- c("CH33") # This is an award code, not an award category
 aid_veterans_dod <- c("NCMIL")
 aid_veterans <- unique(c(aid_veterans_gi,aid_veterans_dod))
 
@@ -253,7 +253,8 @@ if (report_data_year < 2015) {
         select( -EffectiveDatetime )
     
     financial_aid <- getColleagueData( "TA_ACYR" ) %>% 
-        filter( TA.YEAR == local(report_data_year) ) %>% 
+        filter( TA.YEAR == local(report_data_year),
+                !(TA.STUDENT.ID == "1163036" & TA.ACYR == "1163036*NCLLC*2023SU")) %>% 
         select( ID = TA.STUDENT.ID,
                 Term_Reporting_Year = TA.YEAR,
                 Award_Code = TA.AW.ID,
@@ -304,9 +305,17 @@ sfa_group1 <- fall_students %>%
             Award_Category = coalesce(Award_Category,"NONE"),
             Award_Type = coalesce(Award_Type,'-') ) %>%
     mutate( IPEDS_Award_Category = case_when(
+                # Added OUT/I 2024-01-19
+                Award_Category %in% c('OUT') & Award_Type == 'I' ~ "Other grant", # OUT / SECU
+
                 Award_Category %in% c('SCH') & Award_Type == 'F' ~ "Federal grant",
                 Award_Category %in% c('SCH') & Award_Type == 'S' ~ "State grant",
                 Award_Category %in% c('SCH') & Award_Type == 'I' ~ "Institutional grant",
+                
+                # Added INST/I and INST/O 2024-01-19
+                Award_Category %in% c('INST') & Award_Type == 'I' ~ "Institutional grant",  # INST / NS###
+                Award_Category %in% c('INST') & Award_Type == 'O' ~ "Other grant",  # INST / NS### or N0##
+                
                 Award_Category %in% c('SCH') & Award_Type == 'O' ~ "Other grant",
                 Award_Category %in% c('ALT') & Award_Type == 'F' ~ "Federal loan",
                 Award_Category %in% c('ALT') & Award_Type == 'O' ~ "Other loan", # This should be ignored and not reported here.
@@ -319,6 +328,7 @@ sfa_group1 <- fall_students %>%
                 Award_Category %in% aid_federal_ws ~ "Federal work-study",
                 Award_Category %in% aid_other ~ "Other grant",
                 Award_Category %in% aid_other_loans ~ "Other loan",
+                Award_Code %in% aid_veterans ~ "Veterans",
                 Award_Category %in% c('NONE') ~ 'No FA Awards',
                 TRUE ~ "UNDEFINED"
             ),
@@ -613,25 +623,27 @@ groupc_igrnt <- as.integer((ipeds_saf_c %>% collect %$% IGRNT_T)[1])
 groupc_awards <- groupc_pgrnt + groupc_ofgrnt + groupc_sgrnt + groupc_igrnt
 
 #
-# Part D is first-time/first-Term in-state students who were awarded grants or scholarships from
+# THIS IS NOW (2024-2025) PART OF COST II SURVEY
+#
+# Part H is first-time/first-Term in-state students who were awarded grants or scholarships from
 #     federal government, state/local government, or the institution, Counts and Total Awarded 
 #     for various subgroups (GROUP 3)
 #
-saf_d_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
+ct2_h_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
                  FTFT_Y1 = NA_character_, FTFT_Y2 = NA_character_, FTFT_Y3 = NA_character_,
                  ONCAM_Y1 = NA_character_, ONCAM_Y2 = NA_character_, ONCAM_Y3 = NA_character_,
                  OF_W_FAM_Y1 = NA_character_, OF_W_FAM_Y2 = NA_character_, OF_W_FAM_Y3 = NA_character_, 
                  OF_WO_FAM_Y1 = NA_character_, OF_WO_FAM_Y2 = NA_character_, OF_WO_FAM_Y3 = NA_character_, 
                  TOTALG_Y1 = NA_character_ )
-n_cols_d <- c( FTFT_Y1 = NA_character_, ONCAM_Y1 = NA_character_, OF_W_FAM_Y1 = NA_character_, OF_WO_FAM_Y1 = NA_character_ )
-a_cols_d <- c( TOTALG_Y1 = NA_character_ )
+ct2_n_cols_h <- c( FTFT_Y1 = NA_character_, ONCAM_Y1 = NA_character_, OF_W_FAM_Y1 = NA_character_, OF_WO_FAM_Y1 = NA_character_ )
+ct2_a_cols_h <- c( TOTALG_Y1 = NA_character_ )
 b6_cols_d <- c( FTFT_Y2 = NA_character_, FTFT_Y3 = NA_character_,
                 ONCAM_Y2 = NA_character_, ONCAM_Y3 = NA_character_,
                 OF_W_FAM_Y2 = NA_character_, OF_W_FAM_Y3 = NA_character_, 
                 OF_WO_FAM_Y2 = NA_character_, OF_WO_FAM_Y3 = NA_character_
                 )
 
-ipeds_saf_d <- sfa_group3 %>%
+ipeds_ct2_h <- sfa_group3 %>%
     
     summarise( FTFT_Y1 = n_distinct(ID[Award_Amount > 0], na.rm = TRUE),   # IPEDS SFA Part A, Line 03
                ONCAM_Y1 = 0,  # IPEDS SFA Part D, Line 01a, Column 3
@@ -641,10 +653,10 @@ ipeds_saf_d <- sfa_group3 %>%
                TOTALG_Y1 = sum(Award_Amount, na.rm = TRUE)  # IPEDS SFA Part D, Line 02, Column 3
     ) %>%
     
-    add_column( !!!saf_d_cols[!names(saf_d_cols) %in% names(.)] ) %>%
+    add_column( !!!ct2_h_cols[!names(ct2_h_cols) %in% names(.)] ) %>%
     
-    mutate_at(.vars = names(n_cols_d), function(x) {return( sprintf("%06d", x) )} ) %>%
-    mutate_at(.vars = names(a_cols_d), function(x) {return( sprintf("%012.0f", x) )} ) %>%
+    mutate_at(.vars = names(ct2_n_cols_h), function(x) {return( sprintf("%06d", x) )} ) %>%
+    mutate_at(.vars = names(ct2_a_cols_h), function(x) {return( sprintf("%012.0f", x) )} ) %>%
     mutate_at(.vars = names(b6_cols_d), function(x) {return( coalesce(x, "      ") )} ) %>%
     
     # Add additional columns as per Import Specs
@@ -653,32 +665,34 @@ ipeds_saf_d <- sfa_group3 %>%
             PART = 'D' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select( !! names(saf_d_cols) )
+    select( !! names(ct2_h_cols) )
 
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
-    rm( saf_d_cols, a_cols_d, n_cols_d )
+    rm( ct2_h_cols, ct2_a_cols_h, ct2_n_cols_h )
 }
 
-group3_awards <- as.integer((ipeds_saf_d %>% collect %$% TOTALG_Y1)[1])
+group3_awards <- as.integer((ipeds_ct2_h %>% collect %$% TOTALG_Y1)[1])
 
 if ( group3_awards > groupc_awards ) {
-    stop( "Group 3 awards in Part D are greater than the Group 2 awards in Part C, Page 2")
+    stop( "Group 3 awards in CT2 Part H are greater than the Group 2 awards in SFA Part C, Page 2")
 }
 
+
+# THIS IS NOW (2024-2025) PART OF COST II SURVEY
 #
-# Part E is first-time/first-Term in-state students who were awarded awarded Title IV federal student aid 
+# Part I is first-time/first-Term in-state students who were awarded awarded Title IV federal student aid 
 #     which includes Federal Pell, Federal Supplemental Educational Opportunity Grant (FSEOG), Academic 
 #     Competitiveness Grant (ACG), National Science and Mathematics Access to Retain Talent Grant 
 #     (National SMART Grant), Teacher Education Assistance for College and Higher Education (TEACH),
 #     Federal Work Study, Federal Perkins Loan, Subsidized Direct or FFEL Stafford Loan, and
 #     Unsubsidized Direct or FFEL Stafford Loan, Counts by various subgroups (GROUP 4)
 #
-saf_e_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
+ct2_i_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
                  YEAR = NA_character_, FTFT_T4 = NA_character_, ONCAM_T4 = NA_character_, OF_W_FAM_T4 = NA_character_, OF_WO_FAM_T4=NA_character_ )
-n_cols_e <- c( FTFT_T4 = NA_character_, ONCAM_T4 = NA_character_, OF_W_FAM_T4 = NA_character_, OF_WO_FAM_T4 = NA_character_ )
+ct2_n_cols_i <- c( FTFT_T4 = NA_character_, ONCAM_T4 = NA_character_, OF_W_FAM_T4 = NA_character_, OF_WO_FAM_T4 = NA_character_ )
 
-ipeds_saf_e <- sfa_group4 %>%
+ipeds_ct2_i <- sfa_group4 %>%
     # Need just the Title IV recipients here
     filter( Award_Category %in% aid_federal_titleiv ) %>% 
     
@@ -689,7 +703,7 @@ ipeds_saf_e <- sfa_group4 %>%
                OF_WO_FAM_T4 = n_distinct(ID[Living_Arrangement == "AWAY" & Award_Amount > 0], na.rm = TRUE)  # IPEDS SFA Part E, Line 01c, Column 1/2/3
     ) %>%
     
-    mutate_at(.vars = names(n_cols_e), function(x) {return( sprintf("%06d", x) )} ) %>%
+    mutate_at(.vars = names(ct2_n_cols_i), function(x) {return( sprintf("%06d", x) )} ) %>%
 
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
@@ -697,60 +711,62 @@ ipeds_saf_e <- sfa_group4 %>%
             PART = 'E' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select( !! names(saf_e_cols) )
+    select( !! names(ct2_i_cols) )
 
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
-    rm( saf_e_cols, n_cols_e )
+    rm( ct2_i_cols, ct2_n_cols_i )
 }
 
 #
-# Part F is first-time/first-Term in-state students who were awarded awarded Title IV federal student aid 
+# THIS IS NOW (2024-2025) PART OF COST II SURVEY
+#
+# Part J is first-time/first-Term in-state students who were awarded awarded Title IV federal student aid 
 #     which includes Federal Pell, Federal Supplemental Educational Opportunity Grant (FSEOG), Academic 
 #     Competitiveness Grant (ACG), National Science and Mathematics Access to Retain Talent Grant 
 #     (National SMART Grant), Teacher Education Assistance for College and Higher Education (TEACH),
 #     Federal Work Study, Federal Perkins Loan, Subsidized Direct or FFEL Stafford Loan, and
 #     Unsubsidized Direct or FFEL Stafford Loan, Counts and Total Awarded by various subgroups (GROUP 4)
 #
-saf_f_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, YEAR = NA_character_, 
-                 INCOME_RANGE = NA_character_, T4AID_N = NA_character_, T4AID_G = NA_character_, T4AID_T = NA_character_ )
-n_cols_f <- c( T4AID_N = NA_character_, T4AID_G = NA_character_ )
-a_cols_f <- c( T4AID_T = NA_character_ )
+ct2_j_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, YEAR = NA_character_, 
+                 INCOMELEVE = NA_character_, T4AID_N = NA_character_, T4AID_G = NA_character_, T4AID_T = NA_character_ )
+ct2_n_cols_j <- c( T4AID_N = NA_character_, T4AID_G = NA_character_ )
+ct2_a_cols_j <- c( T4AID_T = NA_character_ )
 
 ipeds_award_categories_l04_c2_and_3 <- unique(c(aid_federal_titleiv,
                                                 aid_state_local,
                                                 aid_institution))
 
-ipeds_saf_f <- sfa_group4 %>%
+ipeds_ct2_j <- sfa_group4 %>%
     
-    rename( INCOME_RANGE = Income_Range ) %>%
-    group_by( INCOME_RANGE ) %>%   # IPEDS SFA Part E, Line a/b/c/d/e or 2/3/4
+    rename( INCOMELEVE = Income_Range ) %>%
+    group_by( INCOMELEVE ) %>%   # IPEDS CT2 Part I, Line a/b/c/d/e or 2/3/4
     
     summarise( 
-        # IPEDS SFA Part E, Line 2/3/4, Column 1
+        # IPEDS CT2 Part I, Line 2/3/4, Column 1
         T4AID_N = n_distinct(ID[Award_Amount > 0], na.rm = TRUE),  
-        # IPEDS SFA Part E, Line 2/3/4, Column 2
+        # IPEDS CT2 Part I, Line 2/3/4, Column 2
         T4AID_G = n_distinct(ID[Award_Category %in% ipeds_award_categories_l04_c2_and_3 & Award_Amount > 0], na.rm = TRUE),  
-        # IPEDS SFA Part E, Line 2/3/4, Column 3
+        # IPEDS CT2 Part I, Line 2/3/4, Column 3
         T4AID_T = sum(Award_Amount[Award_Category %in% ipeds_award_categories_l04_c2_and_3], na.rm = TRUE)  
     ) %>%
     
-    mutate_at(.vars = names(n_cols_f), function(x) {return( sprintf("%06d", x) )} ) %>%
-    mutate_at(.vars = names(a_cols_f), function(x) {return( sprintf("%012.0f", x) )} ) %>%
+    mutate_at(.vars = names(ct2_n_cols_j), function(x) {return( sprintf("%06d", x) )} ) %>%
+    mutate_at(.vars = names(ct2_a_cols_j), function(x) {return( sprintf("%012.0f", x) )} ) %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
             SURVSECT = "SFA",
             PART = 'F',
-            YEAR = '1'   # IPEDS SFA Part 
+            YEAR = '1'   # IPEDS CT2 Part 
             ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
-    select( !! names(saf_f_cols) )
+    select( !! names(ct2_j_cols) )
 
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
-    rm( saf_f_cols, a_cols_f, n_cols_f )
+    rm( ct2_j_cols, ct2_a_cols_j, ct2_n_cols_j )
 }
 
 #
@@ -809,8 +825,9 @@ Note: `r str_glue("Withdrawn students have been {withdrawn_student_status}")`
 if (nrow(Undefined_Award_Categories) > 0) {
     warn_pt1 <- print( stringr::str_glue(
             "::: {{.callout-warning}}",
-            "**UNDEFINED** award categories have been found. See the details below",
+            "**UNDEFINED** award categories have been found. See the details below.",
             "",
+            "Award_Category - Award_Code [Award_Type]",
             .sep = "\n"
     ))
     warn_pt2 <- ":::"
@@ -896,7 +913,7 @@ ipeds_saf_c %>%
 #| echo: false
 #| include: true
 
-ipeds_saf_d %>%
+ipeds_ct2_h %>%
     ungroup() %>%
     select( 'FTFT_Y1',  'ONCAM_Y1', 'OF_W_FAM_Y1', 'OF_WO_FAM_Y1', 'TOTALG_Y1' ) %>%
     mutate_at(c('FTFT_Y1',  'ONCAM_Y1', 'OF_W_FAM_Y1', 'OF_WO_FAM_Y1', 'TOTALG_Y1'),as.integer) %>%
@@ -910,7 +927,7 @@ ipeds_saf_d %>%
 #| echo: false
 #| include: true
 
-ipeds_saf_e %>%
+ipeds_ct2_i %>%
     ungroup() %>%
     select( 'YEAR', 'FTFT_T4', 'ONCAM_T4', 'OF_W_FAM_T4', 'OF_WO_FAM_T4' ) %>%
     mutate_at(c('YEAR', 'FTFT_T4', 'ONCAM_T4', 'OF_W_FAM_T4', 'OF_WO_FAM_T4'),as.integer) %>%
@@ -924,10 +941,10 @@ ipeds_saf_e %>%
 #| echo: false
 #| include: true
 
-ipeds_saf_f %>%
+ipeds_ct2_j %>%
     ungroup() %>%
-    select( 'YEAR', 'INCOME_RANGE', 'T4AID_N', 'T4AID_G', 'T4AID_T' ) %>%
-    mutate_at(c('YEAR', 'INCOME_RANGE', 'T4AID_N', 'T4AID_G', 'T4AID_T'),as.integer) %>%
+    select( 'YEAR', 'INCOMELEVE', 'T4AID_N', 'T4AID_G', 'T4AID_T' ) %>%
+    mutate_at(c('YEAR', 'INCOMELEVE', 'T4AID_N', 'T4AID_G', 'T4AID_T'),as.integer) %>%
     gt() %>% 
     fmt_integer( everything() )
 ```
@@ -958,9 +975,9 @@ if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_saf_a), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE  )
     write.table( data.frame(ipeds_saf_b), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
     write.table( data.frame(ipeds_saf_c), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_saf_d), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_saf_e), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_saf_f), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    write.table( data.frame(ipeds_ct2_h), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    write.table( data.frame(ipeds_ct2_i), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    write.table( data.frame(ipeds_ct2_j), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
     write.table( data.frame(ipeds_saf_g), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
 }
 
@@ -972,9 +989,9 @@ if (TEST) {
     write_csv( ipeds_saf_a, file.path(output_path, glue("ipeds_{report_year}_{fn}_a.csv")), na = "" )
     write_csv( ipeds_saf_b, file.path(output_path, glue("ipeds_{report_year}_{fn}_b.csv")), na = "" )
     write_csv( ipeds_saf_c, file.path(output_path, glue("ipeds_{report_year}_{fn}_c.csv")), na = "" )
-    write_csv( ipeds_saf_d, file.path(output_path, glue("ipeds_{report_year}_{fn}_d.csv")), na = "" )
-    write_csv( ipeds_saf_e, file.path(output_path, glue("ipeds_{report_year}_{fn}_e.csv")), na = "" )
-    write_csv( ipeds_saf_f, file.path(output_path, glue("ipeds_{report_year}_{fn}_f.csv")), na = "" )
+    write_csv( ipeds_ct2_h, file.path(output_path, glue("ipeds_{report_year}_{fn}_d.csv")), na = "" )
+    write_csv( ipeds_ct2_i, file.path(output_path, glue("ipeds_{report_year}_{fn}_e.csv")), na = "" )
+    write_csv( ipeds_ct2_j, file.path(output_path, glue("ipeds_{report_year}_{fn}_f.csv")), na = "" )
     write_csv( ipeds_saf_g, file.path(output_path, glue("ipeds_{report_year}_{fn}_g.csv")), na = "" )
 }
 ```

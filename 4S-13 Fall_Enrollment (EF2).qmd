@@ -92,6 +92,14 @@ ipeds_cohorts <- getColleagueData( "ipeds_cohorts", schema="local", version="lat
                 by = "Term_ID" ) %>%
     filter( Cohort_Year %in% c(report_year, report_year - 1) )
 
+# ipeds_cohort_COLLEAGUE_COHORTS <- getColleagueData( "STUDENT_TERMS" ) %>%
+#     select( ID = STTR.STUDENT, Cohort = STTR.FED.COHORT.GROUP ) %>%
+#     distinct() %>%
+#     collect() %>%
+#     mutate( Cohort_Year = substring(Cohort,1,4) ) %>%
+#     filter( Cohort_Year %in% c(report_year, report_year - 1) ) %>%
+#     mutate( Term_ID = str_c(substring(Cohort,1,4),"FA") )
+
 ipeds_cohorts_ids <- ipeds_cohorts %>%
     select(Campus_ID) %>%
     distinct()
@@ -856,6 +864,7 @@ if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_ef2_d), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
     write.table( data.frame(ipeds_ef2_e), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
     write.table( data.frame(ipeds_ef2_f), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    print(str_glue("Data written to {file.path(output_path, fn)}"))
 }
 
 if (TEST) {

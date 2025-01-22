@@ -306,7 +306,7 @@ transferred <- list.files( path = local_nsc_path,
                            ignore.case = TRUE ) %>% 
     lapply(function(x) readr::read_csv(x, col_types = cols(.default = col_character()))) %>% 
     bind_rows %>%
-    separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep=";" ) %>%
+    separate( col=`Requester Return Field`, into=c("ID","Cohort_NSC"), sep=";" ) %>%
     
     # Exclude any enrollment records at HCC
     filter( `College Code/Branch` != str_glue("{fice}-{branch}") ) %>%

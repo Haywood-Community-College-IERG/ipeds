@@ -40,10 +40,10 @@ terms <- getColleagueData( "Term_CU", schema = "dw_dim" ) %>%
 
 ipeds_cohort <- getColleagueData( "ipeds_cohorts", schema = "local", version = "history" ) %>%
     select( ID, Term_ID, Cohort=OM_Cohort ) %>%
-    filter( Cohort %in% c(local(glue("{report_data_year}FT")),
-                          local(glue("{report_data_year}PT")),
-                          local(glue("{report_data_year}TF")),
-                          local(glue("{report_data_year}TP"))) ) %>%
+    filter( Cohort %in% c(local(glue::glue("{report_data_year}FT")),
+                          local(glue::glue("{report_data_year}PT")),
+                          local(glue::glue("{report_data_year}TF")),
+                          local(glue::glue("{report_data_year}TP"))) ) %>%
     collect() %>%
     left_join( terms, by = "Term_ID" )
 
@@ -70,3 +70,4 @@ person <- person <- getColleagueData( "PERSON" ) %>%
     rename( SearchBeginDate = Cohort_Start_Date )
     
 nsc_out <- nsc_request( person, nsc_config, inquiryType = "SE", path = output_path, fn = output_fn )
+print(glue::glue("Output file: {output_path}/{output_fn}"))

@@ -113,7 +113,12 @@ ipeds_cohort <- getColleagueData( "ipeds_cohorts", schema="local", version="late
     collect() %>%
     mutate( IPEDS_Report = if_else(Cohort==report_ftft_150,150,200) ) %>%
     inner_join( terms %>% select(Term_ID,Cohort_Start_Date=Term_Start_Date),
-                by = "Term_ID")
+                by = "Term_ID") %>%
+    mutate(Term = substr(Term_ID, 5, 6)) %>%  # Extract the term part (SU or FA) from Term_ID
+    group_by(ID) %>%
+    filter(!(any(Term == "FA") & Term == "SU")) %>%
+    ungroup() %>%
+    select(-Term)  # Remove the temporary Term column
 
 person <- getColleagueData( "PERSON" ) %>%
     filter( FIRST.NAME != "" ) %>%
@@ -128,7 +133,7 @@ person <- getColleagueData( "PERSON" ) %>%
             RESIDENCE.COUNTRY, 
             VISA.TYPE ) %>%
     collect() %>%
-    inner_join( ipeds_cohort %>% select(ID) ) %>%
+    inner_join( ipeds_cohort %>% select(ID), by = join_by(ID) ) %>%
     mutate( CITIZENSHIP = if_else( CITIZENSHIP == "USA", "", CITIZENSHIP ) ) %>%
  #   left_join( ethnics ) %>%
  #   left_join( foreign_person ) %>%
@@ -182,15 +187,15 @@ student_programs__dates <- getColleagueData( "STUDENT_PROGRAMS__STPR_DATES", ver
     select( ID = STPR.STUDENT, Program = STPR.ACAD.PROGRAM, Program_Start_Date = STPR.START.DATE, Program_End_Date = STPR.END.DATE, EffectiveDatetime ) %>%
     filter( !(Program %in% c('BSP', 'AHS', 'CONED', '=GED', '=HISET', 'C11', 'C50')) ) %>%
     collect() %>%
-    inner_join( ipeds_cohort %>% select(ID) ) %>%
+    inner_join( ipeds_cohort %>% select(ID), by = join_by(ID) ) %>%
     mutate( Program_End_Date = coalesce(Program_End_Date,as.Date('9999-12-31')) )
     
 student_programs <- getColleagueData( "STUDENT_PROGRAMS" ) %>%
     select( ID = STPR.STUDENT, Program = STPR.ACAD.PROGRAM, EffectiveDatetime ) %>%
     collect() %>%
-    inner_join( student_programs__dates ) %>%
+    inner_join( student_programs__dates, by = join_by(ID, Program, EffectiveDatetime) ) %>%
     select( -EffectiveDatetime ) %>%
-    inner_join( ipeds_cohort %>% select(ID, Cohort_Start_Date, IPEDS_Report) ) %>%
+    inner_join( ipeds_cohort %>% select(ID, Cohort_Start_Date, IPEDS_Report), by = join_by(ID) ) %>%
     mutate( Credential_Level = case_when(
         substring(Program,1,1) == "A" ~ 10000,
         substring(Program,1,1) == "D" ~ 1,
@@ -198,14 +203,16 @@ student_programs <- getColleagueData( "STUDENT_PROGRAMS" ) %>%
         TRUE ~ 0
         ), 
         j = 1 ) %>%
-    full_join( terms %>% select(Term_ID, Term_Start_Date, Term_Census_Date, Term_End_Date) %>% mutate(j=1) ) %>%
+    full_join( terms %>% select(Term_ID, Term_Start_Date, Term_Census_Date, Term_End_Date) %>% mutate(j=1), 
+               by = join_by(j),
+               relationship = "many-to-many" ) %>%
     filter( Program_Start_Date <= Term_Census_Date,
             Program_End_Date >= Term_Census_Date,
             Credential_Level > 0 ) %>%
     select( -Term_Census_Date, -j ) %>%
     mutate( Program_Start_Date = if_else(Program_Start_Date < report_term_start_date, report_term_start_date, Program_Start_Date),
             Program_End_Date = if_else(Program_End_Date < Term_End_Date, Term_End_Date, Program_End_Date) ) %>%
-    left_join( acad_programs ) %>%
+    left_join( acad_programs, by = join_by(Program) ) %>%
     select( -c(Program_Start_Date) ) %>%
     mutate( IPEDS_Date_100 = Cohort_Start_Date %m+% months(Program_Length_100),
             IPEDS_Date_150 = ceiling_date(Cohort_Start_Date + duration(Program_Length_150,"months"), "day"),
@@ -231,8 +238,8 @@ acad_credentials <- getColleagueData( "ACAD_CREDENTIALS" ) %>%
             Cast_Date = ACAD.CAST.DATE
             ) %>%
     collect() %>%
-    inner_join( ipeds_cohort %>% select(ID,Cohort_Start_Date) ) %>%
-    left_join( terms %>% select(Term_ID, Term_End_Date ) ) %>%
+    inner_join( ipeds_cohort %>% select(ID,Cohort_Start_Date), by = join_by(ID) ) %>%
+    left_join( terms %>% select(Term_ID, Term_End_Date ), by = join_by(Term_ID) ) %>%
     mutate( Cast_Date = as.Date(Cast_Date) ) %>%
     mutate( Graduation_Date = if_else(Cast_Date < Term_End_Date, Term_End_Date, Cast_Date),
             Graduated = 1 ) %>%
@@ -245,9 +252,9 @@ student_acad_cred <- getColleagueData( "STUDENT_ACAD_CRED" ) %>%
     select( ID = STC.PERSON.ID, Term_ID = STC.TERM ) %>%
     distinct() %>%
     collect() %>%
-    inner_join( terms %>% select(Term_ID,Term_Start_Date) ) %>%
-    left_join( report_term_still_enrolled %>% select(Term_ID) %>% mutate(Enrolled_IPEDS = 1) ) %>%
-    inner_join(ipeds_cohort %>% select(ID,Cohort_Start_Date)) %>%
+    inner_join( terms %>% select(Term_ID,Term_Start_Date), by = join_by(Term_ID) ) %>%
+    left_join( report_term_still_enrolled %>% select(Term_ID) %>% mutate(Enrolled_IPEDS = 1), by = join_by(Term_ID) ) %>%
+    inner_join( ipeds_cohort %>% select(ID,Cohort_Start_Date), by = join_by(ID) ) %>%
     filter( Term_Start_Date >= Cohort_Start_Date) %>%
     mutate( Enrolled = 1,
             Enrolled_IPEDS = coalesce(Enrolled_IPEDS,0) ) %>%
@@ -267,18 +274,22 @@ nsc_files <- list.files( path = local_nsc_path,
     separate( col=`Requester Return Field`, into=c("ID","Term_ID"), sep=";" ) %>%
     filter( `College Code/Branch` != str_glue("{fice}-{branch}") ) %>%
     ungroup() %>%
-    inner_join(ipeds_cohort %>% select(ID,Cohort)) %>% #Term_ID)) %>%
+    inner_join( ipeds_cohort %>% select(ID,Cohort), by = join_by(ID) ) %>%
     select( ID, College_Name=`College Name`, Enrollment_Begin=`Enrollment Begin`, Enrollment_End=`Enrollment End` ) %>%
     mutate( Enrollment_Begin = ymd(Enrollment_Begin),
             Enrollment_End = ymd(Enrollment_End) ) %>%
     mutate( j=1 ) %>%
-    full_join( terms %>% select(Term_ID, Term_Start_Date, Term_Census_Date, Term_End_Date) %>% mutate(j=1) ) %>%
+    full_join( terms %>% select(Term_ID, Term_Start_Date, Term_Census_Date, Term_End_Date) %>% mutate(j=1),
+               by = join_by(j),
+               relationship = "many-to-many" ) %>%
     filter( (Enrollment_Begin <= Term_Start_Date & Enrollment_End > Term_Start_Date) |
             (Enrollment_Begin <= Term_End_Date & Enrollment_End > Term_End_Date) |
             (Enrollment_Begin >= Term_Start_Date & Enrollment_End <= Term_End_Date) ) %>%
     select( ID, Transfer_Term_Start_Date=Term_Start_Date ) %>%
     mutate( j=1 ) %>%
-    full_join( terms %>% select(Term_ID, Term_Start_Date) %>% mutate(j=1) ) %>%
+    full_join( terms %>% select(Term_ID, Term_Start_Date) %>% mutate(j=1),
+               by = join_by(j),
+               relationship = "many-to-many" ) %>%
     filter( Transfer_Term_Start_Date <= Term_Start_Date ) %>%
     mutate( Transferred = 1 ) %>%
     select( -c(Transfer_Term_Start_Date, j) ) %>%
@@ -287,13 +298,15 @@ nsc_files <- list.files( path = local_nsc_path,
 ipeds_terms <- ipeds_cohort %>%
     select( ID, Cohort_Start_Date, IPEDS_Report ) %>%
     mutate( j=1 ) %>%
-    full_join( terms %>% select(Term_ID, Term_Start_Date) %>% mutate(j=1) ) %>%
+    full_join( terms %>% select(Term_ID, Term_Start_Date) %>% mutate(j=1),
+               by = join_by(j),
+               relationship = "many-to-many" ) %>%
     select(-j) %>%
     filter( Term_Start_Date >= Cohort_Start_Date ) %>%
-    left_join( student_programs ) %>%
-    left_join( acad_credentials ) %>%
-    left_join( student_acad_cred ) %>%
-    left_join( nsc_files ) %>%
+    left_join( student_programs, by = join_by(ID, Cohort_Start_Date, IPEDS_Report, Term_ID, Term_Start_Date) ) %>%
+    left_join( acad_credentials, by = join_by(ID, Term_ID, Program) ) %>%
+    left_join( student_acad_cred, by = join_by(ID, Term_ID) ) %>%
+    left_join( nsc_files, by = join_by(ID, Term_ID, Term_Start_Date) ) %>%
     
     # People who graduate in 100% of time are considered having graduated in 150% of time
     # The 200% report are only those who graduated after the 150% mark
@@ -315,21 +328,21 @@ ipeds_terms_grads <- ipeds_terms %>%
     gather( "Grad_Time", "Grad_Level", -c(ID, Term_Start_Date) ) %>%
     mutate( Grad_Time = str_replace(Grad_Time,".*_","") ) %>%
     filter( Grad_Level > 0 ) %>%
-    group_by( ID, Term_Start_Date, Grad_Time ) %>%
-    summarise( Grad_Level = max(Grad_Level) ) %>%
-    group_by( ID, Grad_Time, Grad_Level ) %>%
-    summarise( Graduation_Date = min(Term_Start_Date) ) %>%
-    ungroup()
+    #group_by( ID, Term_Start_Date, Grad_Time ) %>%
+    summarise( Grad_Level = max(Grad_Level), .by = c(ID, Term_Start_Date, Grad_Time) ) %>%
+    #group_by( ID, Grad_Time, Grad_Level ) %>%
+    summarise( Graduation_Date = min(Term_Start_Date), .by = c(ID, Grad_Time, Grad_Level) ) #%>%
+    #ungroup()
 
 ipeds_terms_transferred <- ipeds_terms %>%
     select( ID, Term_Start_Date, Transferred ) %>%
     filter( Transferred > 0 ) %>%
-    left_join( ipeds_terms_grads ) %>%
+    left_join( ipeds_terms_grads, by = join_by(ID), relationship = "many-to-many" ) %>%
     mutate( Graduation_Date = coalesce(Graduation_Date,as.Date("9999-12-31")) ) %>%
     filter( Term_Start_Date <= Graduation_Date ) %>%
-    group_by( ID, Transferred ) %>%
-    summarise( Transferred_Date = min(Term_Start_Date) ) %>%
-    ungroup()
+    #group_by( ID, Transferred ) %>%
+    summarise( Transferred_Date = min(Term_Start_Date), .by = c(ID, Transferred) ) #%>%
+    #ungroup()
 
 fa_terms <- terms %>%
     filter( Term_Reporting_Year %in% c(report_year_150) ) %>% 
@@ -368,7 +381,7 @@ if (report_year < 2018) {
                 DISTRIBUTED.DATE=TA.TERM.XMIT.DT ) %>%
         collect() %>%
         mutate(ID=str_pad(ID,width=7,side="left",pad="0")) %>%
-        inner_join(ipeds_cohort %>% select(ID)) %>%
+        inner_join(ipeds_cohort %>% select(ID), by = join_by(ID)) %>%
         filter( DISTRIBUTED.AMOUNT > 0.00 ) %>%
         select( ID ) %>%
         distinct() %>%
@@ -397,12 +410,12 @@ ipeds_g2_b_10 <- ipeds_terms %>%
     select( ID, Cohort_Start_Date, Term_ID ) %>%
     mutate( IPEDS_Status = '10' ) %>%
     distinct() %>%
-    inner_join( report_term_still_enrolled %>% select(Term_ID) ) %>%
-    group_by( ID ) %>%
-    left_join( person %>% select(ID,IPEDS_Race_Code) ) %>%
-    group_by( IPEDS_Status, IPEDS_Race_Code ) %>%
+    inner_join( report_term_still_enrolled %>% select(Term_ID), by = join_by(Term_ID) ) %>%
+    #group_by( ID ) %>%
+    left_join( person %>% select(ID,IPEDS_Race_Code), by = join_by(ID) ) %>%
+    #group_by( IPEDS_Status, IPEDS_Race_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .by = c(IPEDS_Status, IPEDS_Race_Code) ) %>%
     spread( IPEDS_Race_Code, Students, fill="000000" ) %>%
     rename( LINE = IPEDS_Status ) %>%
     add_column( !!!race_cols[!names(race_cols) %in% names(.)] ) %>%
@@ -420,8 +433,8 @@ ipeds_g2_b <- ipeds_terms %>%
     filter( IPEDS_Report == 150 ) %>%
     select( ID, Cohort_Start_Date, Term_ID, Term_Start_Date, Enrolled_IPEDS ) %>%
     distinct() %>%
-    left_join( ipeds_terms_grads ) %>%
-    left_join( ipeds_terms_transferred ) %>%
+    left_join( ipeds_terms_grads, by = join_by(ID), relationship = "many-to-many" ) %>%
+    left_join( ipeds_terms_transferred, by = join_by(ID) ) %>%
     mutate( Status_Type = case_when(
                 Graduation_Date <= Term_Start_Date ~ case_when(
                     Grad_Time %in% c('100','150') ~ if_else(Grad_Level==1, '11', '12'),
@@ -432,13 +445,13 @@ ipeds_g2_b <- ipeds_terms %>%
                 TRUE ~ '99'
             ) ) %>%
     filter( Status_Type != '99' ) %>%
-    inner_join( report_term_still_enrolled %>% select(Term_ID) ) %>%
-    group_by( ID ) %>%
-    summarise( IPEDS_Status = min(Status_Type) ) %>%
-    left_join( person %>% select(ID,IPEDS_Race_Code) ) %>%
-    group_by( IPEDS_Status, IPEDS_Race_Code ) %>%
+    inner_join( report_term_still_enrolled %>% select(Term_ID), by = join_by(Term_ID) ) %>%
+    #group_by( ID ) %>%
+    summarise( IPEDS_Status = min(Status_Type), .by = ID ) %>%
+    left_join( person %>% select(ID,IPEDS_Race_Code), by = join_by(ID) ) %>%
+    #group_by( IPEDS_Status, IPEDS_Race_Code ) %>%
     mutate( student = 1 ) %>%
-    summarise( Students = sprintf("%06d", sum(student) ) ) %>%
+    summarise( Students = sprintf("%06d", sum(student) ), .by = c(IPEDS_Status, IPEDS_Race_Code) ) %>%
     spread( IPEDS_Race_Code, Students, fill="000000" ) %>%
     rename( LINE = IPEDS_Status ) %>%
     ungroup() %>%
@@ -451,6 +464,15 @@ ipeds_g2_b <- ipeds_terms %>%
             Filler1 = ' ',
             Filler2 = '     ',
             Filler3 = ' ' ) %>%
+    complete( LINE = c('11', '12', '30', '51'), 
+              fill = list( Students = '000000', 
+                           UNITID = ipeds_unitid, 
+                           SURVSECT = params$report_code, 
+                           PART = 'B', 
+                           Filler1 = ' ', 
+                           Filler2 = '     ',
+                           Filler3 = ' ') ) %>%
+    replace( is.na(.), '000000' ) %>%
     select( !! names(g2_b_cols) ) %>%
     # select_( .dots=names(g2_b_cols) ) %>%
     bind_rows( ipeds_g2_b_10 ) %>%
@@ -460,8 +482,8 @@ ipeds_g2_c <- ipeds_terms %>%
     filter( IPEDS_Report == 150 ) %>%
     select( ID, Cohort_Start_Date, Term_ID, Term_Start_Date, Enrolled_IPEDS ) %>%
     distinct() %>%
-    left_join( ipeds_terms_grads ) %>%
-    left_join( ipeds_terms_transferred ) %>%
+    left_join( ipeds_terms_grads, by = join_by(ID), relationship = "many-to-many" ) %>%
+    left_join( ipeds_terms_transferred, by = join_by(ID) ) %>%
     mutate( Status_Type = case_when(
                 Graduation_Date <= Term_Start_Date ~ case_when(
                     Grad_Time %in% c('100') ~ if_else(Grad_Level==1, 'COMP10011', 'COMP10012'),
@@ -470,7 +492,7 @@ ipeds_g2_c <- ipeds_terms %>%
                 TRUE ~ 'ZZZZ99999'
             )
     ) %>%
-    inner_join( report_term_still_enrolled %>% select(Term_ID) ) %>%
+    inner_join( report_term_still_enrolled %>% select(Term_ID), by = join_by(Term_ID) ) %>%
     group_by( ID ) %>%
     summarise( IPEDS_Status = min(Status_Type) ) %>%
     filter( IPEDS_Status != 'ZZZZ99999' ) %>%
@@ -493,9 +515,9 @@ ipeds_g2_d_10 <- ipeds_terms %>%
     select( ID, Cohort_Start_Date, Term_ID ) %>%
     mutate( IPEDS_Status = '10' ) %>%
     distinct() %>%
-    left_join( ta_acyr ) %>%
+    left_join( ta_acyr, by = join_by(ID) ) %>%
     mutate( Pell_Recipient = coalesce(Pell_Recipient,0) ) %>%
-    inner_join( report_term_still_enrolled %>% select(Term_ID) ) %>%
+    inner_join( report_term_still_enrolled %>% select(Term_ID), by = join_by(Term_ID) ) %>%
     mutate( student = 1 ) %>%
     summarise( PELLGRANT_RCPT = sprintf("%06d", sum(Pell_Recipient) ),
                DIRECTLOAN_RCPT = "000000" ) %>%
@@ -512,8 +534,8 @@ ipeds_g2_d <- ipeds_terms %>%
     filter( IPEDS_Report == 150 ) %>%
     select( ID, Cohort_Start_Date, Term_ID, Term_Start_Date ) %>%
     distinct() %>%
-    left_join( ipeds_terms_grads ) %>%
-    left_join( ta_acyr ) %>%
+    left_join( ipeds_terms_grads, by = join_by(ID), relationship = "many-to-many" ) %>%
+    left_join( ta_acyr, by = join_by(ID) ) %>%
     mutate( Pell_Recipient = coalesce(Pell_Recipient,0) ) %>%
     mutate( Pell_150 = case_when(
                 Graduation_Date <= Term_Start_Date ~ case_when(
@@ -523,7 +545,7 @@ ipeds_g2_d <- ipeds_terms %>%
                 TRUE ~ 0
             ) * Pell_Recipient
     ) %>%
-    inner_join( report_term_still_enrolled %>% select(Term_ID) ) %>%
+    inner_join( report_term_still_enrolled %>% select(Term_ID), by = join_by(Term_ID) ) %>%
     group_by( ID ) %>%
     summarise( Pell_Recipient = max(Pell_Recipient),
                Pell_150 = max(Pell_150) ) %>%
@@ -549,12 +571,14 @@ ipeds_g2_d <- ipeds_terms %>%
         bind_rows( ipeds_g2_d_10 ) %>%
         arrange( LINE )        
 
-ipeds_g2_e <- tibble( UNITID = ipeds_unitid,
-                      SURVSECT = params$report_code,
-                      PART = 'E',
-                      GRGU01 = '2',
-                      GRGU011 = '000000',
-                      GRGU012 = '      ' )
+if (report_year < 2024) {
+    ipeds_g2_e <- tibble( UNITID = ipeds_unitid,
+                          SURVSECT = params$report_code,
+                          PART = 'E',
+                          GRGU01 = '2',
+                          GRGU011 = '000000',
+                          GRGU012 = '      ' )
+}
 
 g22_a_cols <- c( UNITID=NA_character_, SURVSECT=NA_character_, PART=NA_character_,
                  Filler=NA_character_,ADEXCL=NA_character_,
@@ -564,7 +588,7 @@ ipeds_g22_a <- ipeds_terms %>%
     filter( IPEDS_Report == 200 ) %>%
     select( ID, Cohort_Start_Date, Term_ID, Term_Start_Date, Enrolled_IPEDS ) %>%
     distinct() %>%
-    left_join( ipeds_terms_grads ) %>%
+    left_join( ipeds_terms_grads, by = join_by(ID), relationship = "many-to-many" ) %>%
     mutate( Status_Type = case_when(
         Graduation_Date <= Term_Start_Date ~ case_when(
             Grad_Time %in% c('100') ~ 'COMPY4_100',
@@ -639,15 +663,19 @@ ipeds_g2_d %>%
 
 ## Part E
 
+This is only completed for reports prior to 2024.
+
 ```{r part-e}
 #| echo: false
 #| include: true
 
-ipeds_g2_e %>%
-    ungroup() %>%
-    select( GRGU01, GRGU011, GRGU012 ) %>%
-    mutate_at(c('GRGU01', 'GRGU011', 'GRGU012'),as.integer) %>%
-    gt()
+if (report_year < 2024) {
+    ipeds_g2_e %>%
+        ungroup() %>%
+        select( GRGU01, GRGU011, GRGU012 ) %>%
+        mutate_at(c('GRGU01', 'GRGU011', 'GRGU012'),as.integer) %>%
+        gt()
+}
 ```
 
 ## Part A - 200
@@ -672,7 +700,9 @@ if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_g2_b), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
     write.table( data.frame(ipeds_g2_c), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
     write.table( data.frame(ipeds_g2_d), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
-    write.table( data.frame(ipeds_g2_e), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    if (report_year < 2024) {
+        write.table( data.frame(ipeds_g2_e), file.path(output_path, fn), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE, append=TRUE  )
+    }
     write.table( data.frame(ipeds_g22_a), file.path(output_path, fn2), sep="", col.names = FALSE, row.names = FALSE, quote=FALSE  )
 }
 ```

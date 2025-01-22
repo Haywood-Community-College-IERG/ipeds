@@ -22,8 +22,10 @@ _Archive.zip
 /3W-09 Outcome_Measures_files
 /4S-10 Human Resources_files
 /*.html
-
 /.quarto/
 /html
 /4S-11-Fall_Enrollment_cache
 /.tours
+/3W-05 Student_Financial_Aid_files
+/renv/*
+/renv/activate.R
