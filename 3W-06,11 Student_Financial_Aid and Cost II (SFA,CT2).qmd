@@ -1,13 +1,14 @@
 ---
-title: "IPEDS Student Financial Aid"
+title: "IPEDS Student Financial Aid and Cost II"
 #format: pdf
 format: html
 #  docx:
 #    highlight-style: github
 params:
-    report_year: "2023"
+    report_year: ""
     report_data_term: ""
     report_code: "SFA"
+    report_code2: "CT2"
     write_output: TRUE
     test: FALSE
     cleanup: FALSE
@@ -434,14 +435,14 @@ saf_a_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_cha
                  Filler_1 = NA_character_,
                  SCFA2a = NA_character_, Filler_SCFA2b = NA_character_,
                  SCFY2a = NA_character_, Filler_SCFY2b = NA_character_,
-                 UGAIDDGN = NA_character_, 
-                 Filler_UGAIDDGPN = NA_character_, Filler_UGLNFDGN = NA_character_,
-                 UGAIDDGA = NA_character_ )
-a_cols_a <- c( UGAIDA = NA_character_, UGAIDPA = NA_character_, 
-               UGLNFA = NA_character_, UGAIDDGA = NA_character_ )
-n_cols_a <- c( SCFA2 = NA_character_, UGAIDN = NA_character_, 
-               UGAIDPN = NA_character_, UGLNFN = NA_character_,
-               SCFA2a = NA_character_, UGAIDDGN = NA_character_)
+                 UGAIDDGN = NA_character_, UGAIDDGPN = NA_character_, UGLNFDGN = NA_character_,
+                 UGAIDDGA = NA_character_, UGAIDDGPA = NA_character_, UGLNFDGA = NA_character_
+                 )
+a_cols_a <- c( UGAIDA = NA_character_, UGAIDPA = NA_character_, UGLNFA = NA_character_, 
+               UGAIDDGA = NA_character_, UGAIDDGPA = NA_character_, UGLNFDGA = NA_character_)
+n_cols_a <- c( SCFA2 = NA_character_, SCFA2a = NA_character_, 
+               UGAIDN = NA_character_, UGAIDPN = NA_character_, UGLNFN = NA_character_,
+               UGAIDDGN = NA_character_, UGAIDDGPN = NA_character_, UGLNFDGN = NA_character_)
 b6_cols_a <- c( SCFY2 = NA_character_, SCFY2a = NA_character_ )
 
 ipeds_award_categories_ugaida <- unique(c(aid_federal_grant,aid_state_local,aid_institution,aid_federal_other,aid_other))
@@ -451,29 +452,34 @@ ipeds_saf_a <- sfa_group1 %>%
     summarise( SCFA2 = n_distinct(ID),  # IPEDS SFA Part A, Line 01
                SCFA2a = n_distinct(ID[Credential_Seeker == 1], na.rm = TRUE),
                
-               # IPEDS Part B, Line 01, Column 1
+               # IPEDS SFA Part B, Line 01, Column 1
                UGAIDN = n_distinct(ID[Award_Amount > 0], na.rm = TRUE),  
-               
-               # IPEDS Part B, Line 01, Column 5 (TODO)
+               # IPEDS SFA Part B, Line 01, Column 3
+               UGAIDA = sum(Award_Amount, na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 01, Column 5
                UGAIDDGN = n_distinct(ID[Award_Amount > 0 & Credential_Seeker == 1], na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 01, Column 7
+               UGAIDDGA = sum(Award_Amount[Credential_Seeker == 1], na.rm = TRUE),  
                
                # IPEDS SFA Part B, Line 02, Column 1
                UGAIDPN = n_distinct(ID[Award_Category %in% aid_federal_pell & Award_Amount > 0], na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 02, Column 3
+               UGAIDPA = sum(Award_Amount[Award_Category %in% aid_federal_pell], na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 02, Column 5
+               UGAIDDGPN = n_distinct(ID[Award_Category %in% aid_federal_pell & Award_Amount > 0 & Credential_Seeker == 1], na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 02, Column 7
+               UGAIDDGPA = sum(Award_Amount[Award_Category %in% aid_federal_pell & Credential_Seeker == 1], na.rm = TRUE),  
                
                # IPEDS SFA Part B, Line 03, Column 1
                UGLNFN = n_distinct(ID[Award_Category %in% aid_federal_loans & Award_Amount > 0], na.rm = TRUE),  
-               
-               # IPEDS SFA Part B, Line 01, Column 3
-               UGAIDA = sum(Award_Amount, na.rm = TRUE),  
-
-               # IPEDS SFA Part B, Line 01, Column 7 (TODO)
-               UGAIDDGA = sum(Award_Amount[Credential_Seeker == 1], na.rm = TRUE),  
-
-               # IPEDS SFA Part B, Line 02, Column 3
-               UGAIDPA = sum(Award_Amount[Award_Category %in% aid_federal_pell], na.rm = TRUE),  
-
                # IPEDS SFA Part B, Line 03, Column 3
                UGLNFA = sum(Award_Amount[Award_Category %in% aid_federal_loans], na.rm = TRUE),
+               # IPEDS SFA Part B, Line 03, Column 5
+               UGLNFDGN = n_distinct(ID[Award_Category %in% aid_federal_loans & Award_Amount > 0 & Credential_Seeker == 1], na.rm = TRUE),  
+               # IPEDS SFA Part B, Line 03, Column 7
+               UGLNFDGA = sum(Award_Amount[Award_Category %in% aid_federal_loans & Credential_Seeker == 1], na.rm = TRUE),
+               
+
     ) %>%
     
     add_column( !!!saf_a_cols[!names(saf_a_cols) %in% names(.)] ) %>%
@@ -484,13 +490,11 @@ ipeds_saf_a <- sfa_group1 %>%
 
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
+            SURVSECT = params$report_code,
             PART = 'A',
             Filler_1 = str_pad('', 36),
             Filler_SCFA2b = str_pad('', 6),
             Filler_SCFY2b = str_pad('', 6),
-            Filler_UGAIDDGPN = str_pad('', 6),
-            Filler_UGLNFDGN = str_pad('', 6)
             ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
@@ -504,21 +508,19 @@ if (CLEANUP) {
 #
 # Part B is First-time/First-Term, Counts of students (GROUP 2)
 #
+# The Filler_ items have been moved to CT2
+#
 saf_b_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
-                 SCFA1N = NA_character_, SCFA11N = NA_character_, SCFA12N = NA_character_, SCFA13N = NA_character_,
-                 SCFY1N = NA_character_,  # IPEDS SFA Part A, Line 02
+                 SCFA1N = NA_character_, Filler_SCFA11N = NA_character_, Filler_SCFA12N = NA_character_, Filler_SCFA13N = NA_character_,
+                 Filler_SCFY1N = NA_character_,  # IPEDS SFA Part A, Line 02
                  ANYAIDN = NA_character_, ANYAIDNF = NA_character_ )
-n_cols_b <- c( SCFA1N = NA_character_, SCFA12N = NA_character_, SCFA13N = NA_character_,
-               ANYAIDN = NA_character_, ANYAIDNF = NA_character_ )
-b6_cols_b <- c( SCFY1N = NA_character_, SCFA11N = NA_character_  )
+n_cols_b <- c( SCFA1N = NA_character_, ANYAIDN = NA_character_, ANYAIDNF = NA_character_ )
 
 
 ipeds_saf_b <- sfa_group2 %>%
     
     summarise( SCFA1N = n_distinct(ID),  # IPEDS SFA Part A, Line 02
-               SCFA12N = n_distinct(ID[Tuition_Type == "In-State"], na.rm = TRUE),  # IPEDS SFA Part C, Page 1, Line 01b
-               SCFA13N = n_distinct(ID[Tuition_Type == "Out-of-State"], na.rm = TRUE),  # IPEDS SFA Part C, Page 1, Line 01c
-               
+
                ANYAIDN = n_distinct(ID[Award_Category %in% aid_group_2a & Award_Amount > 0], na.rm = TRUE),  # IPEDS SFA Part A, Line 02a
                ANYAIDNF = n_distinct(ID[Award_Category %in% aid_group_2b & Award_Amount > 0], na.rm = TRUE)  # IPEDS SFA Part A, Line 02b
     ) %>%
@@ -526,13 +528,15 @@ ipeds_saf_b <- sfa_group2 %>%
     add_column( !!!saf_b_cols[!names(saf_b_cols) %in% names(.)] ) %>%
     
     mutate_at(.vars = names(n_cols_b), function(x) {return( sprintf("%06d", x) )} ) %>%
-    mutate_at(.vars = names(b6_cols_b), function(x) {return( coalesce(x, "      ") )} ) %>%
 
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
+            SURVSECT = params$report_code,
             PART = 'B',
-            SCFA11N = "000000"   # IPEDS SFA Part C, Page 1, Line 01a
+            Filler_SCFA11N = str_pad('', 6),   # These have moved to CT2 Part G
+            Filler_SCFA12N = str_pad('', 6),
+            Filler_SCFA13N = str_pad('', 6),
+            Filler_SCFY1N = str_pad('', 6)
             ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
@@ -541,6 +545,42 @@ ipeds_saf_b <- sfa_group2 %>%
 if (CLEANUP) {
     # Cleanup by removing the extra data frames
     rm( saf_b_cols, n_cols_b )
+}
+
+#
+# CT2 Part G is First-time/First-Term, Counts of students (GROUP 2)
+#
+ct2_g_cols <- c( UNITID = NA_character_, SURVSECT = NA_character_, PART = NA_character_, 
+                 SCFA1N = NA_character_, SCFA11N = NA_character_, SCFA12N = NA_character_, SCFA13N = NA_character_ )
+ct2_n_cols_g <- c( SCFA1N = NA_character_, SCFA12N = NA_character_, SCFA13N = NA_character_ )
+ct2_b6_cols_b <- c( SCFA11N = NA_character_  )
+
+
+ipeds_ct2_g <- sfa_group2 %>%
+    
+    summarise( SCFA1N = n_distinct(ID),  # IPEDS CT2 Section 2, Part A, Establish Your Studen Counts, Line 01
+               #SCFA11N = 0, # IPEDS CT2 Section 2, Part B, Line 02
+               SCFA12N = n_distinct(ID[Tuition_Type == "In-State"], na.rm = TRUE),  # IPEDS CT2 Section 2, Part B, Line 03
+               SCFA13N = n_distinct(ID[Tuition_Type == "Out-of-State"], na.rm = TRUE)  # IPEDS CT2 Section 2, Part B, Line 04
+    ) %>%
+    
+    add_column( !!!ct2_g_cols[!names(ct2_g_cols) %in% names(.)] ) %>%
+    
+    mutate_at(.vars = names(ct2_n_cols_g), function(x) {return( sprintf("%06d", x) )} ) %>%
+    mutate_at(.vars = names(ct2_b6_cols_b), function(x) {return( coalesce(x, "      ") )} ) %>%
+
+    # Add additional columns as per Import Specs
+    mutate( UNITID = ipeds_unitid,
+            SURVSECT = params$report_code2,
+            PART = 'G'
+            ) %>%
+    
+    # Reorder the columns to be in the proper order as per Import Specs
+    select( !! names(ct2_g_cols) )
+
+if (CLEANUP) {
+    # Cleanup by removing the extra data frames
+    rm( ct2_g_cols, ct2_n_cols_g, ct2_b6_cols_b )
 }
 
 #
@@ -605,7 +645,7 @@ ipeds_saf_c <- sfa_group2 %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
+            SURVSECT = params$report_code,
             PART = 'C' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
@@ -661,8 +701,8 @@ ipeds_ct2_h <- sfa_group3 %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
-            PART = 'D' ) %>%
+            SURVSECT = params$report_code2,
+            PART = 'H' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
     select( !! names(ct2_h_cols) )
@@ -707,8 +747,8 @@ ipeds_ct2_i <- sfa_group4 %>%
 
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
-            PART = 'E' ) %>%
+            SURVSECT = params$report_code2,
+            PART = 'I' ) %>%
     
     # Reorder the columns to be in the proper order as per Import Specs
     select( !! names(ct2_i_cols) )
@@ -756,8 +796,8 @@ ipeds_ct2_j <- sfa_group4 %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
-            PART = 'F',
+            SURVSECT = params$report_code2,
+            PART = 'J',
             YEAR = '1'   # IPEDS CT2 Part 
             ) %>%
     
@@ -791,7 +831,7 @@ ipeds_saf_g <- sfa_group1 %>%
     
     # Add additional columns as per Import Specs
     mutate( UNITID = ipeds_unitid,
-            SURVSECT = "SFA",
+            SURVSECT = params$report_code,
             PART = 'G',
             SLEVEL = '1'   # IPEDS SFA Section 2, Line 1/3 
             ) %>%
@@ -859,8 +899,8 @@ if (nrow(Undefined_Award_Categories) > 0) {
 
 ipeds_saf_a %>%
     ungroup() %>%
-    select( SCFA2, SCFA2a, UGAIDN, UGAIDPN, UGLNFN, UGAIDDGN ) %>%
-    mutate_at(c('SCFA2', 'SCFA2a', 'UGAIDN', 'UGAIDPN', 'UGLNFN', 'UGAIDDGN'),as.integer) %>%
+    select( SCFA2, SCFA2a, UGAIDN, UGAIDPN, UGLNFN, UGAIDDGN, UGAIDDGPN, UGLNFDGN ) %>%
+    mutate_at(c('SCFA2', 'SCFA2a', 'UGAIDN', 'UGAIDPN', 'UGLNFN', 'UGAIDDGN', 'UGAIDDGPN', 'UGLNFDGN'),as.integer) %>%
     gt() %>% 
     fmt_integer( everything() )
 ```
@@ -873,8 +913,8 @@ ipeds_saf_a %>%
 
 ipeds_saf_a %>%
     ungroup() %>%
-    select( UGAIDA, UGAIDPA, UGLNFA, UGAIDDGA ) %>%
-    mutate_at(c('UGAIDA', 'UGAIDPA', 'UGLNFA', 'UGAIDDGA'),as.integer) %>%
+    select( UGAIDA, UGAIDPA, UGLNFA, UGAIDDGA, UGAIDDGPA, UGLNFDGA ) %>%
+    mutate_at(c('UGAIDA', 'UGAIDPA', 'UGLNFA', 'UGAIDDGA', 'UGAIDDGPA', 'UGLNFDGA'),as.integer) %>%
     gt() %>% 
     fmt_currency( everything(), decimals = 0, accounting=TRUE )
 ```
@@ -887,8 +927,8 @@ ipeds_saf_a %>%
 
 ipeds_saf_b %>%
     ungroup() %>%
-    select( 'SCFA1N', 'SCFA11N', 'SCFA12N', 'SCFA13N', 'ANYAIDN', 'ANYAIDNF' ) %>%
-    mutate_at(c('SCFA1N', 'SCFA11N', 'SCFA12N', 'SCFA13N', 'ANYAIDN', 'ANYAIDNF'),as.integer) %>%
+    select( 'SCFA1N', 'ANYAIDN', 'ANYAIDNF' ) %>%
+    mutate_at(c('SCFA1N', 'ANYAIDN', 'ANYAIDNF'),as.integer) %>%
     gt() %>% 
     fmt_integer( everything() )
 ```
@@ -907,9 +947,23 @@ ipeds_saf_c %>%
     fmt_integer( everything() )
 ```
 
-## Part D
+## CT2 Part G
 
-```{r part-d}
+```{r ct2-part-g}
+#| echo: false
+#| include: true
+
+ipeds_ct2_g %>%
+    ungroup() %>%
+    select( 'SCFA1N',  'SCFA11N', 'SCFA12N', 'SCFA13N' ) %>%
+    mutate_at(c('SCFA1N',  'SCFA11N', 'SCFA12N', 'SCFA13N'),as.integer) %>%
+    gt() %>% 
+    fmt_integer( everything() )
+```
+
+## CT2 Part H
+
+```{r ct2-part-h}
 #| echo: false
 #| include: true
 
@@ -921,9 +975,9 @@ ipeds_ct2_h %>%
     fmt_integer( everything() )
 ```
 
-## Part E
+## CT2 Part I
 
-```{r part-e}
+```{r ct2-part-i}
 #| echo: false
 #| include: true
 
@@ -935,9 +989,9 @@ ipeds_ct2_i %>%
     fmt_integer( everything() )
 ```
 
-## Part F
+## CT2 Part J
 
-```{r part-f}
+```{r ct2-part-j}
 #| echo: false
 #| include: true
 
@@ -949,19 +1003,6 @@ ipeds_ct2_j %>%
     fmt_integer( everything() )
 ```
 
-## Part G
-
-```{r part-g}
-#| echo: false
-#| include: true
-
-ipeds_saf_g %>%
-    ungroup() %>%
-    select( 'SLEVEL', 'GI_BEN_N', 'GI_BEN_T', 'DOD_ASSIST_N', 'DOD_ASSIST_T' ) %>%
-    mutate_at(c('SLEVEL', 'GI_BEN_N', 'GI_BEN_T', 'DOD_ASSIST_N', 'DOD_ASSIST_T'),as.integer) %>%
-    gt() %>% 
-    fmt_integer( everything() )
-```
 
 ```{r output-data}
 #| echo: false
@@ -975,10 +1016,13 @@ if (WRITE_OUTPUT) {
     write.table( data.frame(ipeds_saf_a), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE  )
     write.table( data.frame(ipeds_saf_b), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
     write.table( data.frame(ipeds_saf_c), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_ct2_h), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_ct2_i), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
-    write.table( data.frame(ipeds_ct2_j), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
     write.table( data.frame(ipeds_saf_g), file.path(output_path, fn), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    
+    
+    write.table( data.frame(ipeds_ct2_g), file.path(output_path, fn2), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE )
+    write.table( data.frame(ipeds_ct2_h), file.path(output_path, fn2), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    write.table( data.frame(ipeds_ct2_i), file.path(output_path, fn2), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
+    write.table( data.frame(ipeds_ct2_j), file.path(output_path, fn2), sep = "", col.names = FALSE, row.names = FALSE, quote = FALSE, append = TRUE  )
 }
 
 if (TEST) {
@@ -986,12 +1030,15 @@ if (TEST) {
     write_csv( sfa_group2, file.path(output_path, glue("sfa_group2_{report_year}.csv")), na = "")
     write_csv( sfa_group3, file.path(output_path, glue("sfa_group3_{report_year}.csv")), na = "")
     write_csv( sfa_group4, file.path(output_path, glue("sfa_group4_{report_year}.csv")), na = "")
+    
     write_csv( ipeds_saf_a, file.path(output_path, glue("ipeds_{report_year}_{fn}_a.csv")), na = "" )
     write_csv( ipeds_saf_b, file.path(output_path, glue("ipeds_{report_year}_{fn}_b.csv")), na = "" )
     write_csv( ipeds_saf_c, file.path(output_path, glue("ipeds_{report_year}_{fn}_c.csv")), na = "" )
-    write_csv( ipeds_ct2_h, file.path(output_path, glue("ipeds_{report_year}_{fn}_d.csv")), na = "" )
-    write_csv( ipeds_ct2_i, file.path(output_path, glue("ipeds_{report_year}_{fn}_e.csv")), na = "" )
-    write_csv( ipeds_ct2_j, file.path(output_path, glue("ipeds_{report_year}_{fn}_f.csv")), na = "" )
     write_csv( ipeds_saf_g, file.path(output_path, glue("ipeds_{report_year}_{fn}_g.csv")), na = "" )
+    
+    write_csv( ipeds_ct2_g, file.path(output_path, glue("ipeds_{report_year}_{fn2}_h.csv")), na = "" )
+    write_csv( ipeds_ct2_h, file.path(output_path, glue("ipeds_{report_year}_{fn2}_h.csv")), na = "" )
+    write_csv( ipeds_ct2_i, file.path(output_path, glue("ipeds_{report_year}_{fn2}_i.csv")), na = "" )
+    write_csv( ipeds_ct2_j, file.path(output_path, glue("ipeds_{report_year}_{fn2}_j.csv")), na = "" )
 }
 ```

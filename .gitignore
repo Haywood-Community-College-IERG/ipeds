@@ -29,3 +29,8 @@ _Archive.zip
 /3W-05 Student_Financial_Aid_files
 /renv/*
 /renv/activate.R
+/data/
+/sql/
+*DONOT*
+*DONT*
+renv/activate.R
